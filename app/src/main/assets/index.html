@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>极简 MD 笔记 - 支持音视频多媒体</title>
+    
+    <!-- 引入第三方解析库 -->
+    <script src="marked.min.js"></script>
+    <script src="jszip.min.js"></script>
+    
+    <!-- 引入外部 CSS 样式 -->
+    <link rel="stylesheet" href="style.css?v=5">
+</head>
+<body>
+
+    <!-- 主界面 -->
+    <div id="main">
+        <!-- 顶部标题栏 -->
+        <div id="file-header">
+            <button class="btn btn-subtle" id="btn-open-drawer">
+                📁 目录 (<span id="total-count">0</span>)
+            </button>
+            <!-- 新增：到顶部按钮 -->
+            <button class="btn btn-subtle" id="btn-scroll-top" title="直达顶部">⬆ 到顶部</button>
+            
+            <div class="header-actions">
+                <div class="mode-toggle" id="mode-toggle-group">
+                    <button class="mode-btn active" id="btn-mode-edit">编辑</button>
+                    <button class="mode-btn" id="btn-mode-preview">预览</button>
+                </div>
+                <!-- 保存与导出独立按钮 -->
+                <button class="btn btn-save" id="btn-save" disabled>保存</button>
+                <button class="btn btn-export" id="btn-export" disabled>导出</button>
+            </div>
+        </div>
+
+        <!-- 内容区容器 -->
+        <div id="content-area">
+            <textarea id="editor" placeholder="点击左上角“📁 目录”新建文件、导入 ZIP 压缩包或文本/音视频文件..." readonly></textarea>
+            <div id="preview"></div>
+            
+            <!-- 媒体查看区 -->
+            <div id="media-viewer">
+                <img id="img-display" src="" alt="图片预览" style="display:none;">
+                <video id="video-display" controls style="display:none;"></video>
+                <div class="media-actions">
+                    <button class="btn btn-subtle" id="btn-zoom-img" style="display:none;">查看大图</button>
+                    <button class="btn btn-subtle" id="btn-copy-tag">复制图片语法</button>
+                </div>
+            </div>
+
+            <!-- 底部的标题与状态展示条 -->
+            <div id="title-bar">
+                <span id="file-title">未选择文件</span>
+                <div class="title-bar-actions">
+                    <!-- 新增：到底部按钮 -->
+                    <button class="btn btn-subtle" id="btn-scroll-bottom" title="直达底部">⬇ 到底部</button>
+                    <button class="btn btn-subtle" id="btn-copy-note-tag" style="display: none;">复制笔记语法</button>
+                    <button class="btn btn-zip" id="btn-export-zip">📦 打包导出全部</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 暗色半透明遮罩层 -->
+    <div id="drawer-overlay"></div>
+
+    <!-- 左侧滑动抽屉面板 -->
+    <div id="bottom-sheet">
+        <div class="sheet-header">
+            <div class="toolbar-group">
+                <button class="btn btn-zip" id="btn-trigger-zip">📦 导入 ZIP</button>
+                <input type="file" id="zip-input" accept=".zip" style="display: none;">
+
+                <button class="btn" id="btn-trigger-files">📄 导入文件</button>
+                <input type="file" id="file-input" multiple style="display: none;">
+            </div>
+            <button class="btn btn-subtle" id="btn-close-drawer">关闭</button>
+        </div>
+        
+        <div id="sheet-content">
+            <!-- 路径搜索输入框与搜索按钮 -->
+            <div class="search-box">
+                <input type="text" id="search-input" class="search-input" placeholder="🔍 检索文件路径/文件名...">
+                <button class="btn" id="btn-search">搜索</button>
+            </div>
+
+            <div class="section-title">📄 笔记目录 (<span id="md-count">0</span>)</div>
+            <ul class="file-tree" id="md-list"></ul>
+
+            <div class="section-title">🎬 媒体资源 (<span id="media-count">0</span>)</div>
+            <ul class="file-tree media-tree" id="media-list"></ul>
+        </div>
+
+        <!-- 抽屉底部固定栏：新建、重命名、导出文件夹、删除按钮 -->
+        <div class="sheet-footer">
+            <div class="footer-row">
+                <button class="btn btn-create" id="btn-create-file">➕ 新文件</button>
+                <button class="btn btn-create" id="btn-create-folder">➕ 新文件夹</button>
+            </div>
+            <div class="footer-row">
+                <button class="btn btn-subtle" id="btn-export-folder">📁 导出文件夹</button>
+                <button class="btn btn-subtle" id="btn-rename-file">✏️ 重命名文件</button>
+                <button class="btn btn-subtle" id="btn-rename-folder">✏️ 重命名文件夹</button>
+            </div>
+            <div class="footer-row">
+                <button class="btn btn-danger" id="btn-delete-file">🗑️ 删除文件</button>
+                <button class="btn btn-danger" id="btn-delete-folder">🗑️ 删除文件夹</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 全屏大图预览弹窗 (Lightbox) -->
+    <div id="image-modal">
+        <div class="modal-counter" id="modal-counter"></div>
+        <span class="modal-close" id="modal-close">&times;</span>
+        <img id="modal-img" src="" alt="全屏大图">
+    </div>
+
+    <!-- 引入外部 JS 脚本 -->
+    <script src="script.js?v=6"></script>
+</body>
+</html>
