@@ -669,7 +669,7 @@ btnDeleteFile.addEventListener('click', () => {
     refreshTrees();
 });
 
-// ==================== 🔑 媒体预览、大图弹窗与上下区域切图 ====================
+// ==================== 媒体预览、大图弹窗与上下区域切图 ====================
 function previewMedia(keyLower, fileName, displayPath, isVideo) {
     syncCurrentContent();
     activeMediaPath = displayPath.replace(/\\/g, '/');
@@ -719,47 +719,42 @@ function updateModalCounter() {
     }
 }
 
-// 🔑 切换上一张/下一张媒体
+// 切换上一张/下一张媒体
 function switchMedia(direction) {
     if (!currentMediaList || currentMediaList.length === 0) return;
 
     let newIndex = currentMediaIndex + direction;
-    if (newIndex < 0) newIndex = currentMediaList.length - 1; // 循环切换
+    if (newIndex < 0) newIndex = currentMediaList.length - 1;
     if (newIndex >= currentMediaList.length) newIndex = 0;
 
     currentMediaIndex = newIndex;
     const targetItem = currentMediaList[currentMediaIndex];
 
-    // 更新界面预览
     previewMedia(targetItem.keyLower, targetItem.name, targetItem.path, targetItem.isVideo);
 
-    // 如果全屏大图正打开着，同时更新大图
     if (imageModal.style.display === 'flex' && !targetItem.isVideo) {
         modalImg.src = mediaUrlsMap.get(targetItem.keyLower);
         updateModalCounter();
     }
 }
 
-// 点击图片或“查看大图”按钮均可放大
 imgDisplay.addEventListener('click', openImageModal);
 btnZoomImg.addEventListener('click', openImageModal);
 
-// 🔑 核心：点击大图上下 50% 区域切换上一张/下一张
 imageModal.addEventListener('click', (e) => {
     if (e.target === modalClose) {
         imageModal.style.display = 'none';
         return;
     }
 
-    // 获取全屏视口点击坐标
     const rect = imageModal.getBoundingClientRect();
     const clickY = e.clientY - rect.top;
     const halfHeight = rect.height / 2;
 
     if (clickY < halfHeight) {
-        switchMedia(-1); // 上半区：上一张
+        switchMedia(-1);
     } else {
-        switchMedia(1);  // 下半区：下一张
+        switchMedia(1);
     }
 });
 
@@ -767,8 +762,7 @@ modalClose.addEventListener('click', () => {
     imageModal.style.display = 'none';
 });
 
-// ==================== 复制语法与顶/底滚动 ====================
-// 修改后的复制逻辑：直接使用带有完整相对路径的 activeMediaPath
+// ==================== 🔑 复制语法与顶/底滚动 ====================
 btnCopyTag.addEventListener('click', () => {
     if (!activeMediaPath) return;
     const tag = `![[${activeMediaPath}]]`; 
@@ -777,12 +771,13 @@ btnCopyTag.addEventListener('click', () => {
     });
 });
 
+// 修改后的笔记复制逻辑：直接使用完整的相对路径 item.path
 if (btnCopyNoteTag) {
     btnCopyNoteTag.addEventListener('click', () => {
         if (!currentFileKey) return;
         const item = fileDataMap.get(currentFileKey);
         if (!item) return;
-        const tag = `[[${item.name}]]`;
+        const tag = `[[${item.path}]]`;
         navigator.clipboard.writeText(tag).then(() => {
             alert(`已复制笔记语法: ${tag}`);
         });
@@ -835,7 +830,6 @@ searchInput.addEventListener('input', () => {
 });
 
 // ==================== Markdown 渲染与 Wiki 语法解析 ====================
-// 修改后的解析逻辑：增加“同目录优先匹配机制”
 function parseObsidianLinks(rawText) {
     let currentFolderPrefix = '';
     if (currentFileKey && currentFileKey.includes('/')) {
