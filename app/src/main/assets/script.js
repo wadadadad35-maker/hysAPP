@@ -64,7 +64,7 @@ let mediaTree = { name: 'root', isFolder: true, children: new Map() };
 let currentFileKey = '';
 let currentMode = 'edit';
 let activeMediaPath = ''; 
-let currentRootFolderPath = ''; // 当前打开的物理文件夹根路径
+let currentRootFolderPath = ''; // 当前打开的物理文件夹绝对路径
 
 let currentMediaList = [];
 let currentMediaIndex = -1;
@@ -73,7 +73,7 @@ let lastRenderedText = '';
 let searchDebounceTimer = null;
 let saveDebounceTimer = null; 
 
-// ==================== 实时保存与同步机制 ====================
+// ==================== 自动防抖保存机制 ====================
 function syncCurrentContent() {
     if (saveDebounceTimer) {
         clearTimeout(saveDebounceTimer);
@@ -90,7 +90,7 @@ function triggerDebouncedSave() {
     if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
     saveDebounceTimer = setTimeout(() => {
         syncCurrentContent();
-        saveCurrentFile(); // 自动打字防抖实时写入本地磁盘
+        saveCurrentFile(); 
     }, 500);
 }
 
@@ -202,7 +202,7 @@ btnOpenDrawer.addEventListener('click', openDrawer);
 btnCloseDrawer.addEventListener('click', closeDrawer);
 drawerOverlay.addEventListener('click', closeDrawer);
 
-// ==================== 目录数据逻辑 ====================
+// ==================== 目录结构解析 ====================
 function insertPathToTree(treeRoot, relativePath, fileInfo) {
     const parts = relativePath.split('/').filter(Boolean);
     let current = treeRoot;
@@ -399,7 +399,7 @@ function updateCounts() {
     totalCount.textContent = fileDataMap.size + mediaUrlsMap.size;
 }
 
-// ==================== 打开本地物理文件夹逻辑 ====================
+// ==================== 扫描与加载本地文件夹 ====================
 btnTriggerFolder.addEventListener('click', () => {
     const inputPath = prompt(
         "请输入手机本地文件夹绝对路径（例如: /sdcard/Documents/Notes）：",
@@ -422,7 +422,6 @@ btnTriggerFolder.addEventListener('click', () => {
     mdTree = { name: 'root', isFolder: true, children: new Map() };
     mediaTree = { name: 'root', isFolder: true, children: new Map() };
 
-    // 🔑 调用 Android 原生接口扫描文件
     const filesJson = window.AndroidFS.scanDirectory(folderPath);
     let files = [];
     try {
@@ -481,10 +480,10 @@ btnTriggerFolder.addEventListener('click', () => {
 
     refreshTrees();
     fileTitle.textContent = folderPath;
-    alert(`成功加载文件夹，共扫描到 ${files.length} 个文件！`);
+    alert(`成功加载，共扫描到 ${files.length} 个文件！`);
 });
 
-// ==================== 物理读取与直接保存文件 ====================
+// ==================== 文件物理读写 ====================
 function loadMdContent(keyLower) {
     syncCurrentContent();
     lastRenderedText = ''; 
@@ -506,7 +505,6 @@ function loadMdContent(keyLower) {
     currentFileKey = keyLower;
     fileTitle.textContent = item.path;
 
-    // 🔑 从磁盘读取最新的文本内容
     if (window.AndroidFS && item.fullPath) {
         item.text = window.AndroidFS.readFile(item.fullPath);
     }
@@ -532,8 +530,6 @@ function saveCurrentFile() {
     if (!item || !item.fullPath) return;
 
     let writeSuccess = false;
-
-    // 🔑 直接写入手机本地物理文件
     if (window.AndroidFS) {
         writeSuccess = window.AndroidFS.writeFile(item.fullPath, editor.value);
     }
@@ -546,16 +542,16 @@ function saveCurrentFile() {
             btnSave.style.background = '#28a745';
         }, 1200);
     } else {
-        alert('写入本地物理磁盘失败！');
+        alert('写入物理磁盘失败！');
     }
 }
 
 btnSave.addEventListener('click', saveCurrentFile);
 
-// ==================== 新建 / 重命名 / 删除 映射到磁盘 ====================
+// ==================== 新建 / 重命名 / 删除文件及文件夹 ====================
 btnCreateFile.addEventListener('click', () => {
     if (!currentRootFolderPath) {
-        alert("请先打开一个本地文件夹！");
+        alert("请先打开本地文件夹！");
         return;
     }
     syncCurrentContent();
@@ -570,11 +566,10 @@ btnCreateFile.addEventListener('click', () => {
     const fullPath = currentRootFolderPath + '/' + relativePath;
 
     if (fileDataMap.has(lowerPath)) {
-        alert('该文件路径已存在！');
+        alert('文件已存在！');
         return;
     }
 
-    // 🔑 写入新文件到物理磁盘
     if (window.AndroidFS) {
         window.AndroidFS.writeFile(fullPath, "");
     }
@@ -589,10 +584,10 @@ btnCreateFile.addEventListener('click', () => {
 
 btnCreateFolder.addEventListener('click', () => {
     if (!currentRootFolderPath) {
-        alert("请先打开一个本地文件夹！");
+        alert("请先打开本地文件夹！");
         return;
     }
-    const inputPath = prompt('请输入新文件夹名称或路径（例如: 子分类/笔记）：');
+    const inputPath = prompt('请输入新文件夹名称或路径（例如: 目录A/子目录）：');
     if (!inputPath || !inputPath.trim()) return;
 
     const folderPath = inputPath.trim().replace(/\\/g, '/');
@@ -606,23 +601,63 @@ btnCreateFolder.addEventListener('click', () => {
     refreshTrees();
 });
 
+btnRenameFile.addEventListener('click', () => {
+    syncCurrentContent();
+    if (!currentFileKey) {
+        alert('请先选择要重命名的文件！');
+        return;
+    }
+
+    const item = fileDataMap.get(currentFileKey);
+    const newFileName = prompt('请输入新文件名（包含后缀）：', item.name);
+    if (!newFileName || newFileName.trim() === '' || newFileName === item.name) return;
+
+    const newPathParts = item.path.split('/');
+    newPathParts[newPathParts.length - 1] = newFileName.trim();
+    const newRelativePath = newPathParts.join('/');
+    const newFullPath = currentRootFolderPath + '/' + newRelativePath;
+    const newLowerKey = newRelativePath.toLowerCase();
+
+    if (fileDataMap.has(newLowerKey)) {
+        alert('同名文件已存在！');
+        return;
+    }
+
+    if (window.AndroidFS && window.AndroidFS.renameFileOrFolder(item.fullPath, newFullPath)) {
+        fileDataMap.delete(currentFileKey);
+        deletePathFromTree(mdTree, item.path);
+
+        item.name = newFileName.trim();
+        item.path = newRelativePath;
+        item.fullPath = newFullPath;
+
+        fileDataMap.set(newLowerKey, item);
+        insertPathToTree(mdTree, newRelativePath, { keyLower: newLowerKey, path: newRelativePath, fullPath: newFullPath, isMedia: false });
+
+        currentFileKey = newLowerKey;
+        refreshTrees();
+        fileTitle.textContent = newRelativePath;
+        alert('重命名成功！');
+    } else {
+        alert('重命名失败！');
+    }
+});
+
 btnDeleteFile.addEventListener('click', () => {
     syncCurrentContent();
-    let targetKey = currentFileKey;
-    let item = fileDataMap.get(targetKey);
-
-    if (!item) {
+    if (!currentFileKey) {
         alert('请先选择要删除的文件！');
         return;
     }
 
-    if (!confirm(`确定要彻底从磁盘删除文件 "${item.path}" 吗？`)) return;
+    const item = fileDataMap.get(currentFileKey);
+    if (!confirm(`确定要彻底删除本地文件 "${item.path}" 吗？`)) return;
 
     if (window.AndroidFS && item.fullPath) {
         window.AndroidFS.deleteFileOrFolder(item.fullPath);
     }
 
-    fileDataMap.delete(targetKey);
+    fileDataMap.delete(currentFileKey);
     deletePathFromTree(mdTree, item.path);
 
     currentFileKey = '';
@@ -632,6 +667,136 @@ btnDeleteFile.addEventListener('click', () => {
     fileTitle.textContent = '未选择文件';
 
     refreshTrees();
+});
+
+// ==================== 🔑 媒体预览、大图弹窗与上下区域切图 ====================
+function previewMedia(keyLower, fileName, displayPath, isVideo) {
+    syncCurrentContent();
+    activeMediaPath = displayPath.replace(/\\/g, '/');
+    currentMediaList = getSameFolderMediaList(keyLower);
+    currentMediaIndex = currentMediaList.findIndex(item => item.keyLower === keyLower);
+
+    fileTitle.textContent = `${isVideo ? '🎬' : '🖼️'} ${displayPath}`;
+
+    editor.style.display = 'none';
+    preview.style.display = 'none';
+    mediaViewer.style.display = 'flex';
+    modeToggleGroup.style.display = 'none';
+    btnSave.style.display = 'none';
+    if (btnCopyNoteTag) btnCopyNoteTag.style.display = 'none';
+
+    const url = mediaUrlsMap.get(keyLower);
+
+    if (isVideo) {
+        imgDisplay.style.display = 'none';
+        btnZoomImg.style.display = 'none';
+        videoDisplay.style.display = 'block';
+        videoDisplay.src = url;
+    } else {
+        videoDisplay.pause();
+        videoDisplay.style.display = 'none';
+        imgDisplay.style.display = 'block';
+        btnZoomImg.style.display = 'inline-flex';
+        imgDisplay.src = url;
+    }
+}
+
+// 放大弹窗逻辑
+function openImageModal() {
+    if (!currentMediaList || currentMediaList.length === 0 || currentMediaIndex === -1) return;
+    const currentItem = currentMediaList[currentMediaIndex];
+    if (currentItem.isVideo) return;
+
+    const url = mediaUrlsMap.get(currentItem.keyLower);
+    modalImg.src = url;
+    updateModalCounter();
+    imageModal.style.display = 'flex';
+}
+
+function updateModalCounter() {
+    if (currentMediaList.length > 0) {
+        modalCounter.textContent = `${currentMediaIndex + 1} / ${currentMediaList.length}`;
+    }
+}
+
+// 🔑 切换上一张/下一张媒体
+function switchMedia(direction) {
+    if (!currentMediaList || currentMediaList.length === 0) return;
+
+    let newIndex = currentMediaIndex + direction;
+    if (newIndex < 0) newIndex = currentMediaList.length - 1; // 循环切换
+    if (newIndex >= currentMediaList.length) newIndex = 0;
+
+    currentMediaIndex = newIndex;
+    const targetItem = currentMediaList[currentMediaIndex];
+
+    // 更新界面预览
+    previewMedia(targetItem.keyLower, targetItem.name, targetItem.path, targetItem.isVideo);
+
+    // 如果全屏大图正打开着，同时更新大图
+    if (imageModal.style.display === 'flex' && !targetItem.isVideo) {
+        modalImg.src = mediaUrlsMap.get(targetItem.keyLower);
+        updateModalCounter();
+    }
+}
+
+// 点击图片或“查看大图”按钮均可放大
+imgDisplay.addEventListener('click', openImageModal);
+btnZoomImg.addEventListener('click', openImageModal);
+
+// 🔑 核心：点击大图上下 50% 区域切换上一张/下一张
+imageModal.addEventListener('click', (e) => {
+    if (e.target === modalClose) {
+        imageModal.style.display = 'none';
+        return;
+    }
+
+    // 获取全屏视口点击坐标
+    const rect = imageModal.getBoundingClientRect();
+    const clickY = e.clientY - rect.top;
+    const halfHeight = rect.height / 2;
+
+    if (clickY < halfHeight) {
+        switchMedia(-1); // 上半区：上一张
+    } else {
+        switchMedia(1);  // 下半区：下一张
+    }
+});
+
+modalClose.addEventListener('click', () => {
+    imageModal.style.display = 'none';
+});
+
+// ==================== 复制语法与顶/底滚动 ====================
+btnCopyTag.addEventListener('click', () => {
+    if (!activeMediaPath) return;
+    const fileName = activeMediaPath.split('/').pop();
+    const tag = `![[${fileName}]]`;
+    navigator.clipboard.writeText(tag).then(() => {
+        alert(`已复制媒体语法: ${tag}`);
+    });
+});
+
+if (btnCopyNoteTag) {
+    btnCopyNoteTag.addEventListener('click', () => {
+        if (!currentFileKey) return;
+        const item = fileDataMap.get(currentFileKey);
+        if (!item) return;
+        const tag = `[[${item.name}]]`;
+        navigator.clipboard.writeText(tag).then(() => {
+            alert(`已复制笔记语法: ${tag}`);
+        });
+    });
+}
+
+btnScrollTop.addEventListener('click', () => {
+    if (currentMode === 'edit') editor.scrollTop = 0;
+    else preview.scrollTop = 0;
+});
+
+btnScrollBottom.addEventListener('click', () => {
+    if (currentMode === 'edit') editor.scrollTop = editor.scrollHeight;
+    else preview.scrollTop = preview.scrollHeight;
 });
 
 // ==================== 搜索逻辑 ====================
@@ -669,35 +834,7 @@ searchInput.addEventListener('input', () => {
     searchDebounceTimer = setTimeout(performSearch, 200);
 });
 
-// ==================== 媒体查看与 Markdown 渲染 ====================
-function previewMedia(keyLower, fileName, displayPath, isVideo) {
-    syncCurrentContent();
-    activeMediaPath = displayPath.replace(/\\/g, '/');
-    currentMediaList = getSameFolderMediaList(keyLower);
-    currentMediaIndex = currentMediaList.findIndex(item => item.keyLower === keyLower);
-
-    fileTitle.textContent = `${isVideo ? '🎬' : '🖼️'} ${displayPath}`;
-
-    editor.style.display = 'none';
-    preview.style.display = 'none';
-    mediaViewer.style.display = 'flex';
-    modeToggleGroup.style.display = 'none';
-    btnSave.style.display = 'none';
-
-    const url = mediaUrlsMap.get(keyLower);
-
-    if (isVideo) {
-        imgDisplay.style.display = 'none';
-        videoDisplay.style.display = 'block';
-        videoDisplay.src = url;
-    } else {
-        videoDisplay.pause();
-        videoDisplay.style.display = 'none';
-        imgDisplay.style.display = 'block';
-        imgDisplay.src = url;
-    }
-}
-
+// ==================== Markdown 渲染与 Wiki 语法解析 ====================
 function parseObsidianLinks(rawText) {
     return rawText.replace(/(!?)\[\[([\s\S]*?)\]\]/g, (match, isEmbed, inner) => {
         let target = inner;
@@ -724,7 +861,7 @@ function parseObsidianLinks(rawText) {
                     ? `<video src="${mediaUrl}" controls style="max-width:100%; border-radius:6px; margin: 8px 0;"></video>`
                     : `<img src="${mediaUrl}" alt="${displayText}" title="${displayText}" />`;
             }
-            return `<span class="missing-link">📎 [媒体未找到: ${cleanTarget}]</span>`;
+            return `<span class="missing-link">📎 [未找到媒体: ${cleanTarget}]</span>`;
         } else {
             let matchedKey = fileDataMap.has(normalizedTarget) 
                 ? normalizedTarget 
@@ -756,7 +893,7 @@ function renderMarkdown() {
     lastRenderedText = rawText; 
 }
 
-// 模式切换绑定
+// 模式切换
 btnModeEdit.addEventListener('click', () => {
     syncCurrentContent();
     currentMode = 'edit';
