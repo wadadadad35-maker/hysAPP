@@ -305,9 +305,11 @@ function renderTreeToDOM(treeNode, containerEl) {
     containerEl.appendChild(rootUl);
 }
 
+// 优化点：使用 DocumentFragment 批量挂载，并移除内联事件触发，改用统一代理
 function createTreeUl(folderNode) {
     const ul = document.createElement('ul');
     ul.className = 'tree-node';
+    const fragment = document.createDocumentFragment();
 
     const sortedItems = Array.from(folderNode.children.values()).sort((a, b) => {
         if (a.isFolder && !b.isFolder) return -1;
@@ -333,29 +335,13 @@ function createTreeUl(folderNode) {
             `;
 
             li.appendChild(folderHeader);
-
-            let childrenUl = null;
-            let isRendered = false;
-
-            folderHeader.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (!isRendered) {
+            li._folderData = item;
+            li._ensureRendered = () => {
+                let childrenUl = li.querySelector(':scope > ul');
+                if (!childrenUl) {
                     childrenUl = createTreeUl(item);
                     childrenUl.style.display = 'none';
                     li.appendChild(childrenUl);
-                    isRendered = true;
-                }
-                const isHidden = childrenUl.style.display === 'none';
-                childrenUl.style.display = isHidden ? 'block' : 'none';
-                folderHeader.querySelector('.arrow').textContent = isHidden ? '▼' : '▶';
-            });
-
-            li._folderData = item;
-            li._ensureRendered = () => {
-                if (!isRendered) {
-                    childrenUl = createTreeUl(item);
-                    li.appendChild(childrenUl);
-                    isRendered = true;
                 }
                 return childrenUl;
             };
@@ -364,28 +350,55 @@ function createTreeUl(folderNode) {
             li.className = 'tree-file';
             li.dataset.key = item.keyLower;
             li.dataset.fileName = item.name.toLowerCase();
+            li._fileItem = item;
 
             const icon = item.isMedia ? (item.isVideo ? '🎬' : '🖼️') : '📄';
             li.innerHTML = `
                 <span class="file-icon">${icon}</span>
                 <span class="file-name" title="${item.name}">${item.name}</span>
             `;
-
-            li.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (item.isMedia) {
-                    previewMedia(item.keyLower, item.name, item.path, item.isVideo);
-                } else {
-                    loadMdContent(item.keyLower);
-                }
-            });
         }
 
-        ul.appendChild(li);
+        fragment.appendChild(li);
     }
 
+    ul.appendChild(fragment);
     return ul;
 }
+
+// 优化点：统一建立事件委托容器，大幅减少内存注册占用
+function setupTreeDelegation(containerEl) {
+    if (!containerEl) return;
+    containerEl.addEventListener('click', (e) => {
+        const folderHeader = e.target.closest('.folder-header');
+        if (folderHeader) {
+            e.stopPropagation();
+            const li = folderHeader.parentElement;
+            if (li && li._ensureRendered) {
+                const childrenUl = li._ensureRendered();
+                const isHidden = childrenUl.style.display === 'none';
+                childrenUl.style.display = isHidden ? 'block' : 'none';
+                const arrow = folderHeader.querySelector('.arrow');
+                if (arrow) arrow.textContent = isHidden ? '▼' : '▶';
+            }
+            return;
+        }
+
+        const fileLi = e.target.closest('.tree-file');
+        if (fileLi && fileLi._fileItem) {
+            e.stopPropagation();
+            const item = fileLi._fileItem;
+            if (item.isMedia) {
+                previewMedia(item.keyLower, item.name, item.path, item.isVideo);
+            } else {
+                loadMdContent(item.keyLower);
+            }
+        }
+    });
+}
+
+setupTreeDelegation(mdList);
+setupTreeDelegation(mediaList);
 
 function refreshTrees() {
     renderTreeToDOM(mdTree, mdList);
@@ -771,7 +784,6 @@ btnCopyTag.addEventListener('click', () => {
     });
 });
 
-// 修改后的笔记复制逻辑：直接使用完整的相对路径 item.path
 if (btnCopyNoteTag) {
     btnCopyNoteTag.addEventListener('click', () => {
         if (!currentFileKey) return;
@@ -795,17 +807,21 @@ btnScrollBottom.addEventListener('click', () => {
 });
 
 // ==================== 搜索逻辑 ====================
+// 优化点：收紧 DOM 查询范围到抽屉内，提高大量节点时的搜索效率
 function performSearch() {
     const query = searchInput.value.toLowerCase().trim();
+    const allElements = document.querySelectorAll('#bottom-sheet .tree-folder, #bottom-sheet .tree-file');
+
     if (!query) {
-        document.querySelectorAll('.tree-folder, .tree-file').forEach(el => el.style.display = '');
+        allElements.forEach(el => el.style.display = '');
         resetTreeCollapse();
         return;
     }
 
-    document.querySelectorAll('.tree-folder, .tree-file').forEach(el => el.style.display = 'none');
+    allElements.forEach(el => el.style.display = 'none');
 
-    document.querySelectorAll('.tree-file').forEach(fileLi => {
+    const fileElements = document.querySelectorAll('#bottom-sheet .tree-file');
+    fileElements.forEach(fileLi => {
         const fileName = fileLi.dataset.fileName || '';
         if (fileName.includes(query)) {
             fileLi.style.display = 'flex';
@@ -813,8 +829,10 @@ function performSearch() {
             while (parent) {
                 if (parent.classList.contains('tree-folder')) {
                     parent.style.display = 'block';
-                    const parentUl = parent._ensureRendered ? parent._ensureRendered() : parent.querySelector(':scope > ul');
-                    if (parentUl) parentUl.style.display = 'block';
+                    if (parent._ensureRendered) {
+                        const parentUl = parent._ensureRendered();
+                        if (parentUl) parentUl.style.display = 'block';
+                    }
                 }
                 if (parent.classList.contains('tree-node')) parent.style.display = 'block';
                 parent = parent.parentElement;
