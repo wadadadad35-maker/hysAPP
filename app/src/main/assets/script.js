@@ -768,10 +768,10 @@ modalClose.addEventListener('click', () => {
 });
 
 // ==================== 复制语法与顶/底滚动 ====================
+// 修改后的复制逻辑：直接使用带有完整相对路径的 activeMediaPath
 btnCopyTag.addEventListener('click', () => {
     if (!activeMediaPath) return;
-    const fileName = activeMediaPath.split('/').pop();
-    const tag = `![[${fileName}]]`;
+    const tag = `![[${activeMediaPath}]]`; 
     navigator.clipboard.writeText(tag).then(() => {
         alert(`已复制媒体语法: ${tag}`);
     });
@@ -835,7 +835,13 @@ searchInput.addEventListener('input', () => {
 });
 
 // ==================== Markdown 渲染与 Wiki 语法解析 ====================
+// 修改后的解析逻辑：增加“同目录优先匹配机制”
 function parseObsidianLinks(rawText) {
+    let currentFolderPrefix = '';
+    if (currentFileKey && currentFileKey.includes('/')) {
+        currentFolderPrefix = currentFileKey.substring(0, currentFileKey.lastIndexOf('/') + 1);
+    }
+
     return rawText.replace(/(!?)\[\[([\s\S]*?)\]\]/g, (match, isEmbed, inner) => {
         let target = inner;
         let alias = '';
@@ -853,7 +859,10 @@ function parseObsidianLinks(rawText) {
         const isVideoExt = VIDEO_REGEX.test(cleanTarget);
 
         if (isEmbed || isImgExt || isVideoExt) {
+            const sameFolderTarget = currentFolderPrefix + normalizedTarget;
+
             let mediaUrl = mediaUrlsMap.get(normalizedTarget) 
+                || mediaUrlsMap.get(sameFolderTarget)
                 || mediaUrlsMap.get(mediaShortNameMap.get(normalizedTarget));
 
             if (mediaUrl) {
