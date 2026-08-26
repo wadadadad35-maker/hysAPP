@@ -264,7 +264,6 @@ function autoExpandCurrentFile() {
 
 function openDrawer() {
     syncCurrentContent();
-    // 🔑 移除 rescanDirectorySilently(); 解决卡顿问题
     resetTreeCollapse();
     bottomSheet.classList.add('active');
     drawerOverlay.classList.add('active');
@@ -525,15 +524,23 @@ function hidePathModal() {
     }
 }
 
-function executeFolderScan(inputPath) {
+// 🔑 修改：添加 isSilent 参数控制弹窗，并在成功读取时将路径写入 localStorage
+function executeFolderScan(inputPath, isSilent = false) {
     if (!inputPath || !inputPath.trim()) return;
 
     const folderPath = inputPath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
     currentRootFolderPath = folderPath;
     currentFolderPath = '';
 
+    // 🔑 记录当前路径到本地存储
+    try {
+        localStorage.setItem('last_folder_path', folderPath);
+    } catch (e) {
+        console.error('无法保存路径到缓存:', e);
+    }
+
     if (typeof window.AndroidFS === 'undefined') {
-        alert("未检测到 Android 原生桥接环境，请在 Android App 内运行！");
+        if (!isSilent) alert("未检测到 Android 原生桥接环境，请在 Android App 内运行！");
         return;
     }
 
@@ -543,7 +550,10 @@ function executeFolderScan(inputPath) {
     refreshTrees();
     fileTitle.textContent = folderPath;
     closeDrawer(); 
-    alert(`成功加载目录！`);
+    
+    if (!isSilent) {
+        alert(`成功加载目录！`);
+    }
 }
 
 btnTriggerFolder.addEventListener('click', showPathModal);
@@ -882,12 +892,10 @@ function switchMedia(direction) {
     currentMediaIndex = newIndex;
     const targetItem = currentMediaList[currentMediaIndex];
 
-    // 🔑 仅当处于单媒体浏览模式下时才切换背景媒体视图
     if (mediaViewer.style.display !== 'none') {
         previewMedia(targetItem.keyLower, targetItem.name, targetItem.path, targetItem.isVideo);
     }
 
-    // 🔑 当处于大图弹窗状态时，直接刷新大图地址与计数器
     if (imageModal.style.display === 'flex' && !targetItem.isVideo) {
         const url = targetItem.srcUrl || mediaUrlsMap.get(targetItem.keyLower) || '';
         modalImg.src = url;
@@ -919,7 +927,7 @@ mediaViewer.addEventListener('click', (e) => {
     }
 });
 
-// 🔑 大图弹窗点击：根据 PREV_TOUCH_RATIO 配置比例区分上一页与下一页
+// 大图弹窗点击：根据 PREV_TOUCH_RATIO 配置比例区分上一页与下一页
 imageModal.addEventListener('click', (e) => {
     if (e.target === modalClose) {
         imageModal.style.display = 'none';
@@ -1081,7 +1089,7 @@ function renderMarkdown() {
     lastRenderedText = rawText; 
 }
 
-// 🔑 文本预览区（#preview）事件委托：点击 Wiki 链接跳转，点击渲染图片按照当前笔记顺序全屏查看
+// 文本预览区（#preview）事件委托：点击 Wiki 链接跳转，点击渲染图片按照当前笔记顺序全屏查看
 preview.addEventListener('click', (e) => {
     // 1. 处理双链 Wiki 文本跳转
     const wikiLink = e.target.closest('a.wiki-link');
@@ -1098,7 +1106,6 @@ preview.addEventListener('click', (e) => {
         const allPreviewImgs = Array.from(preview.querySelectorAll('img'));
         if (allPreviewImgs.length === 0) return;
 
-        // 根据当前笔记 DOM 内所有的图片提取当前笔记专属的媒体列表
         currentMediaList = allPreviewImgs.map(img => {
             const kLower = img.dataset.key || '';
             const displayPath = mediaPathsMap.get(kLower) || img.alt || '图片';
@@ -1143,4 +1150,13 @@ btnModePreview.addEventListener('click', () => {
     editor.style.display = 'none';
     preview.style.display = 'block';
     renderMarkdown();
+});
+
+// ==================== 🔑 页面自动初始化：加载上次路径 ====================
+window.addEventListener('DOMContentLoaded', () => {
+    const savedPath = localStorage.getItem('last_folder_path');
+    if (savedPath) {
+        // 传入 true，表示静默静默加载，不弹窗打扰
+        executeFolderScan(savedPath, true);
+    }
 });
