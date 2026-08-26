@@ -54,7 +54,7 @@ const btnModeEdit = document.getElementById('btn-mode-edit');
 const btnModePreview = document.getElementById('btn-mode-preview');
 
 // ==================== 全局状态与配置参数 ====================
-// 🔑 自定义触碰翻页比例范围（0.3 表示顶部 30% 区域触发上一页，剩余 70% 触发下一页；可自由修改如 0.5、0.4 等）
+// 🔑 自定义触碰翻页比例范围（0.3 表示顶部 30% 区域触发上一页，剩余 70% 触发下一页）
 const PREV_TOUCH_RATIO = 0.3; 
 
 const IMG_REGEX = /\.(png|jpg|jpeg|webp|gif|svg)$/i;
@@ -849,7 +849,7 @@ function openImageModal() {
     const currentItem = currentMediaList[currentMediaIndex];
     if (currentItem.isVideo) return;
 
-    const url = mediaUrlsMap.get(currentItem.keyLower);
+    const url = currentItem.srcUrl || mediaUrlsMap.get(currentItem.keyLower);
     modalImg.src = url;
     updateModalCounter();
     imageModal.style.display = 'flex';
@@ -872,15 +872,20 @@ function switchMedia(direction) {
     currentMediaIndex = newIndex;
     const targetItem = currentMediaList[currentMediaIndex];
 
-    previewMedia(targetItem.keyLower, targetItem.name, targetItem.path, targetItem.isVideo);
+    // 🔑 仅当处于单媒体浏览模式下时才切换背景媒体视图
+    if (mediaViewer.style.display !== 'none') {
+        previewMedia(targetItem.keyLower, targetItem.name, targetItem.path, targetItem.isVideo);
+    }
 
+    // 🔑 当处于大图弹窗状态时，直接刷新大图地址与计数器
     if (imageModal.style.display === 'flex' && !targetItem.isVideo) {
-        modalImg.src = mediaUrlsMap.get(targetItem.keyLower);
+        const url = targetItem.srcUrl || mediaUrlsMap.get(targetItem.keyLower) || '';
+        modalImg.src = url;
         updateModalCounter();
     }
 }
 
-// 🔑 点击图片直接放大进入大图弹窗，同时阻止事件冒泡引发切图
+// 点击图片直接放大进入大图弹窗
 imgDisplay.addEventListener('click', (e) => {
     e.stopPropagation();
     openImageModal();
@@ -888,7 +893,7 @@ imgDisplay.addEventListener('click', (e) => {
 
 btnZoomImg.addEventListener('click', openImageModal);
 
-// 🔑 常规预览区域点击空白/空白边缘时按 PREV_TOUCH_RATIO 翻页
+// 常规预览区域点击空白/空白边缘时按 PREV_TOUCH_RATIO 翻页
 mediaViewer.addEventListener('click', (e) => {
     if (e.target.closest('button') || e.target.closest('.media-btn') || e.target.tagName === 'VIDEO' || e.target === imgDisplay) {
         return;
@@ -1022,14 +1027,17 @@ function parseObsidianLinks(rawText) {
         if (isEmbed || isImgExt || isVideoExt) {
             const sameFolderTarget = currentFolderPrefix + normalizedTarget;
 
-            let mediaUrl = mediaUrlsMap.get(normalizedTarget) 
-                || mediaUrlsMap.get(sameFolderTarget)
-                || mediaUrlsMap.get(mediaShortNameMap.get(normalizedTarget));
+            let keyLowerToUse = '';
+            if (mediaUrlsMap.has(normalizedTarget)) keyLowerToUse = normalizedTarget;
+            else if (mediaUrlsMap.has(sameFolderTarget)) keyLowerToUse = sameFolderTarget;
+            else if (mediaShortNameMap.has(normalizedTarget)) keyLowerToUse = mediaShortNameMap.get(normalizedTarget);
+
+            let mediaUrl = keyLowerToUse ? mediaUrlsMap.get(keyLowerToUse) : null;
 
             if (mediaUrl) {
                 return isVideoExt 
-                    ? `<video src="${mediaUrl}" controls style="max-width:100%; border-radius:6px; margin: 8px 0;"></video>`
-                    : `<img src="${mediaUrl}" alt="${displayText}" title="${displayText}" />`;
+                    ? `<video src="${mediaUrl}" data-key="${keyLowerToUse}" controls style="max-width:100%; border-radius:6px; margin: 8px 0;"></video>`
+                    : `<img src="${mediaUrl}" data-key="${keyLowerToUse}" alt="${displayText}" title="${displayText}" style="cursor: pointer;" />`;
             }
             return `<span class="missing-link">📎 [未找到媒体: ${cleanTarget}]</span>`;
         } else {
@@ -1062,6 +1070,48 @@ function renderMarkdown() {
     }
     lastRenderedText = rawText; 
 }
+
+// 🔑 文本预览区（#preview）事件委托：点击 Wiki 链接跳转，点击渲染图片按照当前笔记顺序全屏查看
+preview.addEventListener('click', (e) => {
+    // 1. 处理双链 Wiki 文本跳转
+    const wikiLink = e.target.closest('a.wiki-link');
+    if (wikiLink && wikiLink.dataset.key) {
+        e.preventDefault();
+        loadMdContent(wikiLink.dataset.key);
+        return;
+    }
+
+    // 2. 处理预览图片点击进入大图弹窗，并按笔记内部图片出现的顺序建立切图目录
+    const clickedImg = e.target.closest('img');
+    if (clickedImg) {
+        e.stopPropagation();
+        const allPreviewImgs = Array.from(preview.querySelectorAll('img'));
+        if (allPreviewImgs.length === 0) return;
+
+        // 根据当前笔记 DOM 内所有的图片提取当前笔记专属的媒体列表
+        currentMediaList = allPreviewImgs.map(img => {
+            const kLower = img.dataset.key || '';
+            const displayPath = mediaPathsMap.get(kLower) || img.alt || '图片';
+            const fileName = displayPath.split('/').pop();
+            return {
+                keyLower: kLower,
+                name: fileName,
+                path: displayPath,
+                isFolder: false,
+                isMedia: true,
+                isVideo: false,
+                srcUrl: img.src
+            };
+        });
+
+        currentMediaIndex = allPreviewImgs.indexOf(clickedImg);
+        if (currentMediaIndex !== -1) {
+            modalImg.src = clickedImg.src;
+            updateModalCounter();
+            imageModal.style.display = 'flex';
+        }
+    }
+});
 
 // 模式切换
 btnModeEdit.addEventListener('click', () => {
