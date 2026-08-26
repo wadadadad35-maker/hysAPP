@@ -68,10 +68,10 @@ let mdTree = { name: 'root', isFolder: true, children: new Map() };
 let mediaTree = { name: 'root', isFolder: true, children: new Map() };
 
 let currentFileKey = '';
-let currentFolderPath = ''; // 记录当前选中的文件夹相对路径
+let currentFolderPath = ''; 
 let currentMode = 'edit';
 let activeMediaPath = ''; 
-let currentRootFolderPath = ''; // 当前打开的物理文件夹绝对路径
+let currentRootFolderPath = ''; 
 
 let currentMediaList = [];
 let currentMediaIndex = -1;
@@ -116,7 +116,7 @@ function clearMediaCache() {
     fileShortNameMap.clear();
 }
 
-// ==================== 目录静默重扫（方案 A） ====================
+// ==================== 目录静默重扫 ====================
 function rescanDirectorySilently() {
     if (!currentRootFolderPath || typeof window.AndroidFS === 'undefined') return;
 
@@ -134,7 +134,6 @@ function rescanDirectorySilently() {
     mediaTree = { name: 'root', isFolder: true, children: new Map() };
 
     files.forEach(f => {
-        // 如果扫描项是文件夹，独立写入目录树中
         if (f.isFolder) {
             insertFolderToTree(mdTree, f.relativePath);
             return;
@@ -261,7 +260,7 @@ function autoExpandCurrentFile() {
 
 function openDrawer() {
     syncCurrentContent();
-    rescanDirectorySilently(); // 每次打开侧边栏时，静默扫描外部最新文件变动
+    rescanDirectorySilently();
     resetTreeCollapse();
     bottomSheet.classList.add('active');
     drawerOverlay.classList.add('active');
@@ -503,7 +502,7 @@ function updateCounts() {
     totalCount.textContent = fileDataMap.size + mediaUrlsMap.size;
 }
 
-// ==================== 扫描与加载本地文件夹 (自定义弹窗交互) ====================
+// ==================== 扫描与加载本地文件夹 ====================
 function showPathModal() {
     if (modalPathInput) {
         modalPathInput.value = currentRootFolderPath || "/sdcard/Documents/";
@@ -808,14 +807,17 @@ btnDeleteFolder.addEventListener('click', () => {
     rescanDirectorySilently();
 });
 
-// ==================== 媒体预览、大图弹窗与上下区域切图 ====================
+// ==================== 媒体预览、查看进度与上下区域切图 ====================
 function previewMedia(keyLower, fileName, displayPath, isVideo) {
     syncCurrentContent();
     activeMediaPath = displayPath.replace(/\\/g, '/');
     currentMediaList = getSameFolderMediaList(keyLower);
     currentMediaIndex = currentMediaList.findIndex(item => item.keyLower === keyLower);
 
-    fileTitle.textContent = `${isVideo ? '🎬' : '🖼️'} ${displayPath}`;
+    // 🔑 在预览区顶部标题直接实时显示翻页进度（如：1/5）
+    const totalCount = currentMediaList.length;
+    const progressText = totalCount > 0 ? ` (${currentMediaIndex + 1}/${totalCount})` : '';
+    fileTitle.textContent = `${isVideo ? '🎬' : '🖼️'} ${displayPath}${progressText}`;
 
     editor.style.display = 'none';
     preview.style.display = 'none';
@@ -857,13 +859,12 @@ function updateModalCounter() {
     }
 }
 
-// 🔑 边界拦截版：首页点上一页 / 尾页点下一页 直接无响应
+// 🔑 边界拦截：首页点上一页 / 尾页点下一页 直接无响应
 function switchMedia(direction) {
     if (!currentMediaList || currentMediaList.length === 0) return;
 
     let newIndex = currentMediaIndex + direction;
 
-    // 边界检测：超出第一页或最后一页范围直接返回
     if (newIndex < 0 || newIndex >= currentMediaList.length) return;
 
     currentMediaIndex = newIndex;
@@ -877,7 +878,24 @@ function switchMedia(direction) {
     }
 }
 
-imgDisplay.addEventListener('click', openImageModal);
+// 🔑 在预览区域内直接点击 上/下 区域进行翻页（无需进入大图弹窗）
+mediaViewer.addEventListener('click', (e) => {
+    // 过滤：点击放大按钮、复制按钮或视频控制组件时不触发翻页
+    if (e.target.closest('button') || e.target.closest('.media-btn') || e.target.tagName === 'VIDEO') {
+        return;
+    }
+
+    const rect = mediaViewer.getBoundingClientRect();
+    const clickY = e.clientY - rect.top;
+    const halfHeight = rect.height / 2;
+
+    if (clickY < halfHeight) {
+        switchMedia(-1); // 上半部分：上一页
+    } else {
+        switchMedia(1);  // 下半部分：下一页
+    }
+});
+
 btnZoomImg.addEventListener('click', openImageModal);
 
 imageModal.addEventListener('click', (e) => {
@@ -901,7 +919,7 @@ modalClose.addEventListener('click', () => {
     imageModal.style.display = 'none';
 });
 
-// ==================== 🔑 复制语法与顶/底滚动 ====================
+// ==================== 复制语法与顶/底滚动 ====================
 btnCopyTag.addEventListener('click', () => {
     if (!activeMediaPath) return;
     const tag = `![[${activeMediaPath}]]`; 
