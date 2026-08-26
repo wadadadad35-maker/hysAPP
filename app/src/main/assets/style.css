@@ -58,12 +58,12 @@ body { display: flex; flex-direction: column; }
 .btn:active { background: #1177bb; }
 .btn-zip { background: #d7ba7d; color: #1e1e1e; }
 
-/* 保存与导出按钮样式 */
+/* 保存与刷新目录按钮样式 */
 .btn-save { background: #28a745; font-size: 12px; }
 .btn-save:disabled { background: #444; color: #888; cursor: not-allowed; }
 
-.btn-export { background: #17a2b8; font-size: 12px; }
-.btn-export:disabled { background: #444; color: #888; cursor: not-allowed; }
+.btn-refresh { background: #17a2b8; font-size: 12px; }
+.btn-refresh:active { background: #138496; }
 
 .btn-subtle { background: #3c3c3c; color: #ccc; }
 

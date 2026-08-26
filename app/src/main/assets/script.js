@@ -47,7 +47,8 @@ const btnModalCancel = document.getElementById('btn-modal-cancel');
 const btnModalConfirm = document.getElementById('btn-modal-confirm');
 
 const btnSave = document.getElementById('btn-save');
-const btnExport = document.getElementById('btn-export');
+// 🔑 替换原有的 btnExport 为 btnRefresh
+const btnRefresh = document.getElementById('btn-refresh');
 
 const modeToggleGroup = document.getElementById('mode-toggle-group');
 const btnModeEdit = document.getElementById('btn-mode-edit');
@@ -263,7 +264,7 @@ function autoExpandCurrentFile() {
 
 function openDrawer() {
     syncCurrentContent();
-    rescanDirectorySilently();
+    // 🔑 移除 rescanDirectorySilently(); 解决卡顿问题
     resetTreeCollapse();
     bottomSheet.classList.add('active');
     drawerOverlay.classList.add('active');
@@ -578,6 +579,17 @@ if (customPathModal) {
     });
 }
 
+// 🔑 手动刷新目录按钮功能
+btnRefresh.addEventListener('click', () => {
+    if (!currentRootFolderPath) {
+        alert("请先打开本地文件夹！");
+        return;
+    }
+    syncCurrentContent();
+    rescanDirectorySilently();
+    alert("目录已成功扫描刷新！");
+});
+
 // ==================== 文件物理读写 ====================
 function loadMdContent(keyLower) {
     syncCurrentContent();
@@ -591,7 +603,6 @@ function loadMdContent(keyLower) {
     mediaViewer.style.display = 'none';
     modeToggleGroup.style.display = 'flex';
     btnSave.style.display = 'block';
-    btnExport.style.display = 'block';
     if (btnCopyNoteTag) btnCopyNoteTag.style.display = 'inline-flex';
 
     const item = fileDataMap.get(keyLower);
@@ -607,7 +618,6 @@ function loadMdContent(keyLower) {
     editor.value = item.text || "";
     editor.removeAttribute('readonly');
     btnSave.removeAttribute('disabled');
-    btnExport.removeAttribute('disabled');
 
     if (currentMode === 'preview') {
         editor.style.display = 'none';

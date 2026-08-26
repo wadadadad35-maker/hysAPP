@@ -28,7 +28,8 @@
                     <button class="mode-btn" id="btn-mode-preview">预览</button>
                 </div>
                 <button class="btn btn-save" id="btn-save" disabled>保存</button>
-                <button class="btn btn-export" id="btn-export" disabled>导出</button>
+                <!-- 🔑 将原有的导出按钮替换为刷新目录按钮 -->
+                <button class="btn btn-refresh" id="btn-refresh">🔄 刷新目录</button>
             </div>
         </div>
 
@@ -65,7 +66,7 @@
     <div id="bottom-sheet">
         <div class="sheet-header">
             <div class="toolbar-group">
-                <!-- 🔑 打开本地文件夹按钮 -->
+                <!-- 打开本地文件夹按钮 -->
                 <button class="btn btn-zip" id="btn-trigger-folder">📁 打开文件夹</button>
             </div>
             <button class="btn btn-subtle" id="btn-close-drawer">关闭</button>
