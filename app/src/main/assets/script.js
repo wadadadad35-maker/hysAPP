@@ -53,7 +53,10 @@ const modeToggleGroup = document.getElementById('mode-toggle-group');
 const btnModeEdit = document.getElementById('btn-mode-edit');
 const btnModePreview = document.getElementById('btn-mode-preview');
 
-// ==================== 全局状态与正则定义 ====================
+// ==================== 全局状态与配置参数 ====================
+// 🔑 自定义触碰翻页比例范围（0.3 表示顶部 30% 区域触发上一页，剩余 70% 触发下一页；可自由修改如 0.5、0.4 等）
+const PREV_TOUCH_RATIO = 0.3; 
+
 const IMG_REGEX = /\.(png|jpg|jpeg|webp|gif|svg)$/i;
 const VIDEO_REGEX = /\.(mp4|webm|mkv|mov|avi)$/i;
 
@@ -807,14 +810,13 @@ btnDeleteFolder.addEventListener('click', () => {
     rescanDirectorySilently();
 });
 
-// ==================== 媒体预览、查看进度与上下区域切图 ====================
+// ==================== 媒体预览、大图与上下触碰切图 ====================
 function previewMedia(keyLower, fileName, displayPath, isVideo) {
     syncCurrentContent();
     activeMediaPath = displayPath.replace(/\\/g, '/');
     currentMediaList = getSameFolderMediaList(keyLower);
     currentMediaIndex = currentMediaList.findIndex(item => item.keyLower === keyLower);
 
-    // 🔑 在预览区顶部标题直接实时显示翻页进度（如：1/5）
     const totalCount = currentMediaList.length;
     const progressText = totalCount > 0 ? ` (${currentMediaIndex + 1}/${totalCount})` : '';
     fileTitle.textContent = `${isVideo ? '🎬' : '🖼️'} ${displayPath}${progressText}`;
@@ -859,7 +861,7 @@ function updateModalCounter() {
     }
 }
 
-// 🔑 边界拦截：首页点上一页 / 尾页点下一页 直接无响应
+// 边界拦截切图函数
 function switchMedia(direction) {
     if (!currentMediaList || currentMediaList.length === 0) return;
 
@@ -878,26 +880,31 @@ function switchMedia(direction) {
     }
 }
 
-// 🔑 在预览区域内直接点击 上/下 区域进行翻页（无需进入大图弹窗）
-mediaViewer.addEventListener('click', (e) => {
-    // 过滤：点击放大按钮、复制按钮或视频控制组件时不触发翻页
-    if (e.target.closest('button') || e.target.closest('.media-btn') || e.target.tagName === 'VIDEO') {
-        return;
-    }
-
-    const rect = mediaViewer.getBoundingClientRect();
-    const clickY = e.clientY - rect.top;
-    const halfHeight = rect.height / 2;
-
-    if (clickY < halfHeight) {
-        switchMedia(-1); // 上半部分：上一页
-    } else {
-        switchMedia(1);  // 下半部分：下一页
-    }
+// 🔑 点击图片直接放大进入大图弹窗，同时阻止事件冒泡引发切图
+imgDisplay.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openImageModal();
 });
 
 btnZoomImg.addEventListener('click', openImageModal);
 
+// 🔑 常规预览区域点击空白/空白边缘时按 PREV_TOUCH_RATIO 翻页
+mediaViewer.addEventListener('click', (e) => {
+    if (e.target.closest('button') || e.target.closest('.media-btn') || e.target.tagName === 'VIDEO' || e.target === imgDisplay) {
+        return;
+    }
+
+    const rect = mediaViewer.getBoundingClientRect();
+    const clickRatio = (e.clientY - rect.top) / rect.height;
+
+    if (clickRatio < PREV_TOUCH_RATIO) {
+        switchMedia(-1);
+    } else {
+        switchMedia(1);
+    }
+});
+
+// 🔑 大图弹窗点击：根据 PREV_TOUCH_RATIO 配置比例区分上一页与下一页
 imageModal.addEventListener('click', (e) => {
     if (e.target === modalClose) {
         imageModal.style.display = 'none';
@@ -905,10 +912,9 @@ imageModal.addEventListener('click', (e) => {
     }
 
     const rect = imageModal.getBoundingClientRect();
-    const clickY = e.clientY - rect.top;
-    const halfHeight = rect.height / 2;
+    const clickRatio = (e.clientY - rect.top) / rect.height;
 
-    if (clickY < halfHeight) {
+    if (clickRatio < PREV_TOUCH_RATIO) {
         switchMedia(-1);
     } else {
         switchMedia(1);
