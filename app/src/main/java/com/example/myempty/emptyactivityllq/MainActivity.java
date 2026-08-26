@@ -119,17 +119,21 @@ public class MainActivity extends AppCompatActivity {
             File[] files = dir.listFiles();
             if (files == null) return;
             for (File f : files) {
-                if (f.isDirectory()) {
-                    scanRecursive(f, rootPath, result);
-                } else {
-                    try {
-                        JSONObject obj = new JSONObject();
-                        obj.put("fullPath", f.getAbsolutePath());
-                        obj.put("relativePath", f.getAbsolutePath().substring(rootPath.length() + 1).replace("\\", "/"));
-                        obj.put("name", f.getName());
+                try {
+                    JSONObject obj = new JSONObject();
+                    obj.put("fullPath", f.getAbsolutePath());
+                    obj.put("relativePath", f.getAbsolutePath().substring(rootPath.length() + 1).replace("\\", "/"));
+                    obj.put("name", f.getName());
+
+                    if (f.isDirectory()) {
+                        obj.put("isFolder", true);
                         result.put(obj);
-                    } catch (Exception ignored) {}
-                }
+                        scanRecursive(f, rootPath, result);
+                    } else {
+                        obj.put("isFolder", false);
+                        result.put(obj);
+                    }
+                } catch (Exception ignored) {}
             }
         }
 

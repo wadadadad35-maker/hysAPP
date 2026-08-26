@@ -68,6 +68,7 @@ let mdTree = { name: 'root', isFolder: true, children: new Map() };
 let mediaTree = { name: 'root', isFolder: true, children: new Map() };
 
 let currentFileKey = '';
+let currentFolderPath = ''; // 记录当前选中的文件夹相对路径
 let currentMode = 'edit';
 let activeMediaPath = ''; 
 let currentRootFolderPath = ''; // 当前打开的物理文件夹绝对路径
@@ -113,6 +114,75 @@ function clearMediaCache() {
     mediaPathsMap.clear();
     mediaShortNameMap.clear();
     fileShortNameMap.clear();
+}
+
+// ==================== 目录静默重扫（方案 A） ====================
+function rescanDirectorySilently() {
+    if (!currentRootFolderPath || typeof window.AndroidFS === 'undefined') return;
+
+    const filesJson = window.AndroidFS.scanDirectory(currentRootFolderPath);
+    let files = [];
+    try {
+        files = JSON.parse(filesJson);
+    } catch(e) {
+        return;
+    }
+
+    fileDataMap.clear();
+    clearMediaCache();
+    mdTree = { name: 'root', isFolder: true, children: new Map() };
+    mediaTree = { name: 'root', isFolder: true, children: new Map() };
+
+    files.forEach(f => {
+        // 如果扫描项是文件夹，独立写入目录树中
+        if (f.isFolder) {
+            insertFolderToTree(mdTree, f.relativePath);
+            insertFolderToTree(mediaTree, f.relativePath);
+            return;
+        }
+
+        const lowerPath = f.relativePath.toLowerCase();
+        const lowerFileName = f.name.toLowerCase();
+
+        if (IMG_REGEX.test(f.name) || VIDEO_REGEX.test(f.name)) {
+            const fileUrl = "file://" + f.fullPath;
+            const isVideo = VIDEO_REGEX.test(f.name);
+
+            mediaUrlsMap.set(lowerPath, fileUrl);
+            mediaPathsMap.set(lowerPath, f.relativePath);
+            if (!mediaShortNameMap.has(lowerFileName)) {
+                mediaShortNameMap.set(lowerFileName, lowerPath);
+            }
+
+            insertPathToTree(mediaTree, f.relativePath, {
+                keyLower: lowerPath,
+                path: f.relativePath,
+                fullPath: f.fullPath,
+                isMedia: true,
+                isVideo: isVideo
+            });
+        } else {
+            fileDataMap.set(lowerPath, { 
+                path: f.relativePath, 
+                fullPath: f.fullPath, 
+                name: f.name,
+                text: "" 
+            });
+
+            if (!fileShortNameMap.has(lowerFileName)) {
+                fileShortNameMap.set(lowerFileName, lowerPath);
+            }
+
+            insertPathToTree(mdTree, f.relativePath, {
+                keyLower: lowerPath,
+                path: f.relativePath,
+                fullPath: f.fullPath,
+                isMedia: false
+            });
+        }
+    });
+
+    refreshTrees();
 }
 
 // ==================== 抽屉与树形 UI 渲染 ====================
@@ -192,6 +262,7 @@ function autoExpandCurrentFile() {
 
 function openDrawer() {
     syncCurrentContent();
+    rescanDirectorySilently(); // 每次打开侧边栏时，静默扫描外部最新文件变动
     resetTreeCollapse();
     bottomSheet.classList.add('active');
     drawerOverlay.classList.add('active');
@@ -212,15 +283,18 @@ drawerOverlay.addEventListener('click', closeDrawer);
 function insertPathToTree(treeRoot, relativePath, fileInfo) {
     const parts = relativePath.split('/').filter(Boolean);
     let current = treeRoot;
+    let currentPath = '';
 
     for (let i = 0; i < parts.length; i++) {
         const part = parts[i];
         const partLower = part.toLowerCase();
         const isLast = (i === parts.length - 1);
+        currentPath = currentPath ? `${currentPath}/${part}` : part;
 
         if (isLast) {
             current.children.set(partLower, {
                 name: part,
+                path: relativePath,
                 isFolder: false,
                 ...fileInfo
             });
@@ -228,6 +302,7 @@ function insertPathToTree(treeRoot, relativePath, fileInfo) {
             if (!current.children.has(partLower)) {
                 current.children.set(partLower, {
                     name: part,
+                    path: currentPath,
                     isFolder: true,
                     children: new Map()
                 });
@@ -240,11 +315,16 @@ function insertPathToTree(treeRoot, relativePath, fileInfo) {
 function insertFolderToTree(treeRoot, folderPath) {
     const parts = folderPath.replace(/\\/g, '/').split('/').filter(Boolean);
     let current = treeRoot;
+    let currentPath = '';
+
     for (const part of parts) {
         const partLower = part.toLowerCase();
+        currentPath = currentPath ? `${currentPath}/${part}` : part;
+
         if (!current.children.has(partLower)) {
             current.children.set(partLower, {
                 name: part,
+                path: currentPath,
                 isFolder: true,
                 children: new Map()
             });
@@ -328,6 +408,7 @@ function createTreeUl(folderNode) {
         if (item.isFolder) {
             li.className = 'tree-folder';
             li.dataset.folderName = item.name.toLowerCase();
+            if (item.path) li.dataset.folderPath = item.path;
 
             const folderHeader = document.createElement('div');
             folderHeader.className = 'folder-header';
@@ -378,6 +459,13 @@ function setupTreeDelegation(containerEl) {
         if (folderHeader) {
             e.stopPropagation();
             const li = folderHeader.parentElement;
+
+            if (li && li.dataset.folderPath) {
+                currentFolderPath = li.dataset.folderPath;
+                document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('active'));
+                folderHeader.classList.add('active');
+            }
+
             if (li && li._ensureRendered) {
                 const childrenUl = li._ensureRendered();
                 const isHidden = childrenUl.style.display === 'none';
@@ -440,6 +528,7 @@ function executeFolderScan(inputPath) {
 
     const folderPath = inputPath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
     currentRootFolderPath = folderPath;
+    currentFolderPath = '';
 
     if (typeof window.AndroidFS === 'undefined') {
         alert("未检测到 Android 原生桥接环境，请在 Android App 内运行！");
@@ -447,72 +536,12 @@ function executeFolderScan(inputPath) {
     }
 
     syncCurrentContent();
-
-    fileDataMap.clear();
-    clearMediaCache();
-    mdTree = { name: 'root', isFolder: true, children: new Map() };
-    mediaTree = { name: 'root', isFolder: true, children: new Map() };
-
-    const filesJson = window.AndroidFS.scanDirectory(folderPath);
-    let files = [];
-    try {
-        files = JSON.parse(filesJson);
-    } catch(e) {
-        alert("扫描文件夹出错: " + e.message);
-        return;
-    }
-
-    if (files.length === 0) {
-        alert(`未在路径 "${folderPath}" 下找到任何文件或目录不存在！`);
-        return;
-    }
-
-    files.forEach(f => {
-        const lowerPath = f.relativePath.toLowerCase();
-        const lowerFileName = f.name.toLowerCase();
-
-        if (IMG_REGEX.test(f.name) || VIDEO_REGEX.test(f.name)) {
-            const fileUrl = "file://" + f.fullPath;
-            const isVideo = VIDEO_REGEX.test(f.name);
-
-            mediaUrlsMap.set(lowerPath, fileUrl);
-            mediaPathsMap.set(lowerPath, f.relativePath);
-            if (!mediaShortNameMap.has(lowerFileName)) {
-                mediaShortNameMap.set(lowerFileName, lowerPath);
-            }
-
-            insertPathToTree(mediaTree, f.relativePath, {
-                keyLower: lowerPath,
-                path: f.relativePath,
-                fullPath: f.fullPath,
-                isMedia: true,
-                isVideo: isVideo
-            });
-        } else {
-            fileDataMap.set(lowerPath, { 
-                path: f.relativePath, 
-                fullPath: f.fullPath, 
-                name: f.name,
-                text: "" 
-            });
-
-            if (!fileShortNameMap.has(lowerFileName)) {
-                fileShortNameMap.set(lowerFileName, lowerPath);
-            }
-
-            insertPathToTree(mdTree, f.relativePath, {
-                keyLower: lowerPath,
-                path: f.relativePath,
-                fullPath: f.fullPath,
-                isMedia: false
-            });
-        }
-    });
+    rescanDirectorySilently();
 
     refreshTrees();
     fileTitle.textContent = folderPath;
-    closeDrawer(); // 扫描完成后自动关闭侧边栏
-    alert(`成功加载，共扫描到 ${files.length} 个文件！`);
+    closeDrawer(); 
+    alert(`成功加载目录！`);
 }
 
 btnTriggerFolder.addEventListener('click', showPathModal);
@@ -708,6 +737,33 @@ btnRenameFile.addEventListener('click', () => {
     }
 });
 
+btnRenameFolder.addEventListener('click', () => {
+    if (!currentFolderPath) {
+        alert('请先点击选择要重命名的文件夹！');
+        return;
+    }
+
+    const pathParts = currentFolderPath.replace(/\\/g, '/').split('/').filter(Boolean);
+    const oldFolderName = pathParts[pathParts.length - 1];
+    const newFolderName = prompt('请输入新文件夹名称：', oldFolderName);
+    
+    if (!newFolderName || !newFolderName.trim() || newFolderName === oldFolderName) return;
+
+    pathParts[pathParts.length - 1] = newFolderName.trim();
+    const newFolderPath = pathParts.join('/');
+    
+    const oldFullPath = currentRootFolderPath + '/' + currentFolderPath;
+    const newFullPath = currentRootFolderPath + '/' + newFolderPath;
+
+    if (window.AndroidFS && window.AndroidFS.renameFileOrFolder(oldFullPath, newFullPath)) {
+        alert('文件夹重命名成功！');
+        currentFolderPath = '';
+        rescanDirectorySilently();
+    } else {
+        alert('文件夹重命名失败！');
+    }
+});
+
 btnDeleteFile.addEventListener('click', () => {
     syncCurrentContent();
     if (!currentFileKey) {
@@ -732,6 +788,25 @@ btnDeleteFile.addEventListener('click', () => {
     fileTitle.textContent = '未选择文件';
 
     refreshTrees();
+});
+
+btnDeleteFolder.addEventListener('click', () => {
+    if (!currentFolderPath) {
+        alert('请先点击选择要删除的文件夹！');
+        return;
+    }
+
+    if (!confirm(`确定要彻底删除文件夹 "${currentFolderPath}" 及其包含的所有内容吗？`)) return;
+
+    const fullPath = currentRootFolderPath + '/' + currentFolderPath;
+
+    if (window.AndroidFS) {
+        window.AndroidFS.deleteFileOrFolder(fullPath);
+    }
+
+    alert('文件夹已删除！');
+    currentFolderPath = '';
+    rescanDirectorySilently();
 });
 
 // ==================== 媒体预览、大图弹窗与上下区域切图 ====================
@@ -766,7 +841,6 @@ function previewMedia(keyLower, fileName, displayPath, isVideo) {
     }
 }
 
-// 放大弹窗逻辑
 function openImageModal() {
     if (!currentMediaList || currentMediaList.length === 0 || currentMediaIndex === -1) return;
     const currentItem = currentMediaList[currentMediaIndex];
@@ -784,7 +858,6 @@ function updateModalCounter() {
     }
 }
 
-// 切换上一张/下一张媒体
 function switchMedia(direction) {
     if (!currentMediaList || currentMediaList.length === 0) return;
 
