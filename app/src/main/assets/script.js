@@ -136,9 +136,9 @@ function rescanDirectorySilently() {
     files.forEach(f => {
         // 如果扫描项是文件夹，独立写入目录树中
         if (f.isFolder) {
-        insertFolderToTree(mdTree, f.relativePath);
-        return;
-    }
+            insertFolderToTree(mdTree, f.relativePath);
+            return;
+        }
 
         const lowerPath = f.relativePath.toLowerCase();
         const lowerFileName = f.name.toLowerCase();
@@ -857,12 +857,14 @@ function updateModalCounter() {
     }
 }
 
+// 🔑 边界拦截版：首页点上一页 / 尾页点下一页 直接无响应
 function switchMedia(direction) {
     if (!currentMediaList || currentMediaList.length === 0) return;
 
     let newIndex = currentMediaIndex + direction;
-    if (newIndex < 0) newIndex = currentMediaList.length - 1;
-    if (newIndex >= currentMediaList.length) newIndex = 0;
+
+    // 边界检测：超出第一页或最后一页范围直接返回
+    if (newIndex < 0 || newIndex >= currentMediaList.length) return;
 
     currentMediaIndex = newIndex;
     const targetItem = currentMediaList[currentMediaIndex];
