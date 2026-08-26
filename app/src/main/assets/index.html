@@ -9,7 +9,7 @@
     <script src="marked.min.js"></script>
     
     <!-- 引入外部 CSS 样式 -->
-    <link rel="stylesheet" href="style.css?v=5">
+    <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 
@@ -65,7 +65,7 @@
     <div id="bottom-sheet">
         <div class="sheet-header">
             <div class="toolbar-group">
-                <!-- 🔑 已替换为直接打开本地文件夹 -->
+                <!-- 🔑 打开本地文件夹按钮 -->
                 <button class="btn btn-zip" id="btn-trigger-folder">📁 打开文件夹</button>
             </div>
             <button class="btn btn-subtle" id="btn-close-drawer">关闭</button>
@@ -107,6 +107,21 @@
         <img id="modal-img" src="" alt="全屏大图">
     </div>
 
-    <script src="script.js?v=6"></script>
+    <!-- 自定义路径输入弹窗 (替代原生 prompt，彻底去除 file:// 网址提示栏) -->
+    <div id="custom-path-modal" class="custom-modal-overlay">
+        <div class="custom-modal-content">
+            <div class="custom-modal-header">📂 打开本地文件夹</div>
+            <div class="custom-modal-body">
+                <label for="modal-path-input">请输入手机本地文件夹绝对路径：</label>
+                <input type="text" id="modal-path-input" placeholder="例如: /sdcard/Documents/Notes">
+            </div>
+            <div class="custom-modal-footer">
+                <button class="btn btn-subtle" id="btn-modal-cancel">取消</button>
+                <button class="btn btn-create" id="btn-modal-confirm">确定打开</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js?v=7"></script>
 </body>
 </html>

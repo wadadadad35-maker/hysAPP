@@ -40,6 +40,12 @@ const modalImg = document.getElementById('modal-img');
 const modalClose = document.getElementById('modal-close');
 const modalCounter = document.getElementById('modal-counter');
 
+// 路径输入自定义弹窗 DOM 节点
+const customPathModal = document.getElementById('custom-path-modal');
+const modalPathInput = document.getElementById('modal-path-input');
+const btnModalCancel = document.getElementById('btn-modal-cancel');
+const btnModalConfirm = document.getElementById('btn-modal-confirm');
+
 const btnSave = document.getElementById('btn-save');
 const btnExport = document.getElementById('btn-export');
 
@@ -305,7 +311,6 @@ function renderTreeToDOM(treeNode, containerEl) {
     containerEl.appendChild(rootUl);
 }
 
-// 优化点：使用 DocumentFragment 批量挂载，并移除内联事件触发，改用统一代理
 function createTreeUl(folderNode) {
     const ul = document.createElement('ul');
     ul.className = 'tree-node';
@@ -366,7 +371,6 @@ function createTreeUl(folderNode) {
     return ul;
 }
 
-// 优化点：统一建立事件委托容器，大幅减少内存注册占用
 function setupTreeDelegation(containerEl) {
     if (!containerEl) return;
     containerEl.addEventListener('click', (e) => {
@@ -412,12 +416,26 @@ function updateCounts() {
     totalCount.textContent = fileDataMap.size + mediaUrlsMap.size;
 }
 
-// ==================== 扫描与加载本地文件夹 ====================
-btnTriggerFolder.addEventListener('click', () => {
-    const inputPath = prompt(
-        "请输入手机本地文件夹绝对路径（例如: /sdcard/Documents/Notes）：",
-        currentRootFolderPath || "/sdcard/Documents/"
-    );
+// ==================== 扫描与加载本地文件夹 (自定义弹窗交互) ====================
+function showPathModal() {
+    if (modalPathInput) {
+        modalPathInput.value = currentRootFolderPath || "/sdcard/Documents/";
+    }
+    if (customPathModal) {
+        customPathModal.classList.add('active');
+        setTimeout(() => {
+            if (modalPathInput) modalPathInput.focus();
+        }, 100);
+    }
+}
+
+function hidePathModal() {
+    if (customPathModal) {
+        customPathModal.classList.remove('active');
+    }
+}
+
+function executeFolderScan(inputPath) {
     if (!inputPath || !inputPath.trim()) return;
 
     const folderPath = inputPath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
@@ -493,8 +511,42 @@ btnTriggerFolder.addEventListener('click', () => {
 
     refreshTrees();
     fileTitle.textContent = folderPath;
+    closeDrawer(); // 扫描完成后自动关闭侧边栏
     alert(`成功加载，共扫描到 ${files.length} 个文件！`);
-});
+}
+
+btnTriggerFolder.addEventListener('click', showPathModal);
+
+if (btnModalCancel) {
+    btnModalCancel.addEventListener('click', hidePathModal);
+}
+
+if (btnModalConfirm) {
+    btnModalConfirm.addEventListener('click', () => {
+        const val = modalPathInput ? modalPathInput.value : '';
+        hidePathModal();
+        executeFolderScan(val);
+    });
+}
+
+if (modalPathInput) {
+    modalPathInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const val = modalPathInput.value;
+            hidePathModal();
+            executeFolderScan(val);
+        }
+    });
+}
+
+if (customPathModal) {
+    customPathModal.addEventListener('click', (e) => {
+        if (e.target === customPathModal) {
+            hidePathModal();
+        }
+    });
+}
 
 // ==================== 文件物理读写 ====================
 function loadMdContent(keyLower) {
@@ -807,7 +859,6 @@ btnScrollBottom.addEventListener('click', () => {
 });
 
 // ==================== 搜索逻辑 ====================
-// 优化点：收紧 DOM 查询范围到抽屉内，提高大量节点时的搜索效率
 function performSearch() {
     const query = searchInput.value.toLowerCase().trim();
     const allElements = document.querySelectorAll('#bottom-sheet .tree-folder, #bottom-sheet .tree-file');
