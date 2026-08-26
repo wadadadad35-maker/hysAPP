@@ -136,10 +136,9 @@ function rescanDirectorySilently() {
     files.forEach(f => {
         // 如果扫描项是文件夹，独立写入目录树中
         if (f.isFolder) {
-            insertFolderToTree(mdTree, f.relativePath);
-            insertFolderToTree(mediaTree, f.relativePath);
-            return;
-        }
+        insertFolderToTree(mdTree, f.relativePath);
+        return;
+    }
 
         const lowerPath = f.relativePath.toLowerCase();
         const lowerFileName = f.name.toLowerCase();
