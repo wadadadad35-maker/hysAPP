@@ -53,8 +53,9 @@ const modeToggleGroup = document.getElementById('mode-toggle-group');
 const btnModeEdit = document.getElementById('btn-mode-edit');
 const btnModePreview = document.getElementById('btn-mode-preview');
 
-// 🔑 新增：当前笔记内搜索 DOM 节点
+// 当前笔记内搜索 DOM 节点
 const noteSearchInput = document.getElementById('note-search-input');
+const btnNoteSearch = document.getElementById('btn-note-search'); // 🔑 新增：手动搜索按钮
 const noteSearchCount = document.getElementById('note-search-count');
 const btnSearchPrev = document.getElementById('btn-search-prev');
 const btnSearchNext = document.getElementById('btn-search-next');
@@ -85,10 +86,9 @@ let currentMediaList = [];
 let currentMediaIndex = -1;
 let lastRenderedText = '';
 
-let searchDebounceTimer = null;
 let saveDebounceTimer = null; 
 
-// 🔑 新增：笔记内搜索全局状态
+// 笔记内搜索全局状态
 let noteSearchMatches = [];
 let currentNoteSearchIndex = -1;
 
@@ -113,12 +113,10 @@ function triggerDebouncedSave() {
     }, 500);
 }
 
+// 🔑 移除了修改编辑框文本时自动触发搜索与跳转的逻辑
 if (editor) {
     editor.addEventListener('input', () => {
         triggerDebouncedSave();
-        if (noteSearchInput && noteSearchInput.value.trim()) {
-            performNoteSearch();
-        }
     });
 }
 
@@ -648,12 +646,8 @@ function loadMdContent(keyLower) {
         preview.style.display = 'none';
     }
 
-    // 重新触发笔记内检索高亮
-    if (noteSearchInput && noteSearchInput.value.trim()) {
-        performNoteSearch();
-    } else {
-        resetNoteSearch();
-    }
+    // 重置搜索状态，切换笔记时不自动跳转
+    resetNoteSearch();
 }
 
 function saveCurrentFile() {
@@ -1026,13 +1020,18 @@ function performSearch() {
     });
 }
 
+// 🔑 点击搜索按钮触发抽屉搜索
 btnSearch.addEventListener('click', performSearch);
-searchInput.addEventListener('input', () => {
-    clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(performSearch, 200);
+
+// 🔑 键盘按下 Enter 键才触发抽屉搜索（去除了原本输入时的自动 input 监听）
+searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        performSearch();
+    }
 });
 
-// ==================== 🔑 当前笔记内文本搜索功能 ====================
+// ==================== 当前笔记内文本搜索功能 ====================
 function resetNoteSearch() {
     noteSearchMatches = [];
     currentNoteSearchIndex = -1;
@@ -1041,7 +1040,7 @@ function resetNoteSearch() {
 }
 
 function performNoteSearch() {
-    const query = noteSearchInput ? noteSearchInput.value : '';
+    const query = noteSearchInput ? noteSearchInput.value.trim() : '';
     noteSearchMatches = [];
     currentNoteSearchIndex = -1;
 
@@ -1072,7 +1071,7 @@ function performNoteSearch() {
 function jumpToNoteMatch() {
     if (currentNoteSearchIndex < 0 || currentNoteSearchIndex >= noteSearchMatches.length) return;
 
-    const query = noteSearchInput.value;
+    const query = noteSearchInput.value.trim();
     const matchStart = noteSearchMatches[currentNoteSearchIndex];
     const matchEnd = matchStart + query.length;
 
@@ -1084,7 +1083,7 @@ function jumpToNoteMatch() {
         editor.focus();
         editor.setSelectionRange(matchStart, matchEnd);
 
-        // 智能定位：按文本所在行数计算比例并居中滚动
+        // 按文本所在行数计算比例并滚动居中
         const textBefore = editor.value.substring(0, matchStart);
         const lineNumber = textBefore.split('\n').length;
         const totalLines = editor.value.split('\n').length;
@@ -1141,15 +1140,16 @@ function removePreviewHighlights() {
     });
 }
 
+// 🔑 只有点击搜索按钮或按下 Enter 键时才触发笔记内搜索/跳转
+if (btnNoteSearch) {
+    btnNoteSearch.addEventListener('click', performNoteSearch);
+}
+
 if (noteSearchInput) {
-    noteSearchInput.addEventListener('input', performNoteSearch);
     noteSearchInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
-            if (noteSearchMatches.length > 0) {
-                currentNoteSearchIndex = (currentNoteSearchIndex + 1) % noteSearchMatches.length;
-                jumpToNoteMatch();
-            }
+            performNoteSearch();
         }
     });
 }
@@ -1238,10 +1238,6 @@ function renderMarkdown() {
         preview.innerHTML = marked.parse(processedText, { breaks: true });
     }
     lastRenderedText = rawText;
-
-    if (noteSearchInput && noteSearchInput.value.trim() && currentMode === 'preview') {
-        jumpToNoteMatch();
-    }
 }
 
 preview.addEventListener('click', (e) => {
@@ -1290,9 +1286,6 @@ btnModeEdit.addEventListener('click', () => {
     mediaViewer.style.display = 'none';
     editor.style.display = 'block';
     preview.style.display = 'none';
-    if (noteSearchInput && noteSearchInput.value.trim()) {
-        performNoteSearch();
-    }
 });
 
 btnModePreview.addEventListener('click', () => {
