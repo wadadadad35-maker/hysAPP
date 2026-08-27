@@ -55,10 +55,11 @@ const btnModePreview = document.getElementById('btn-mode-preview');
 
 // 当前笔记内搜索 DOM 节点
 const noteSearchInput = document.getElementById('note-search-input');
-const btnNoteSearch = document.getElementById('btn-note-search'); // 🔑 新增：手动搜索按钮
+const btnNoteSearch = document.getElementById('btn-note-search');
 const noteSearchCount = document.getElementById('note-search-count');
 const btnSearchPrev = document.getElementById('btn-search-prev');
 const btnSearchNext = document.getElementById('btn-search-next');
+const btnSearchExit = document.getElementById('btn-search-exit'); // 🔑 新增：退出搜索按钮
 
 // ==================== 全局状态与配置参数 ====================
 const PREV_TOUCH_RATIO = 0.3; 
@@ -113,7 +114,6 @@ function triggerDebouncedSave() {
     }, 500);
 }
 
-// 🔑 移除了修改编辑框文本时自动触发搜索与跳转的逻辑
 if (editor) {
     editor.addEventListener('input', () => {
         triggerDebouncedSave();
@@ -646,7 +646,6 @@ function loadMdContent(keyLower) {
         preview.style.display = 'none';
     }
 
-    // 重置搜索状态，切换笔记时不自动跳转
     resetNoteSearch();
 }
 
@@ -1020,10 +1019,8 @@ function performSearch() {
     });
 }
 
-// 🔑 点击搜索按钮触发抽屉搜索
 btnSearch.addEventListener('click', performSearch);
 
-// 🔑 键盘按下 Enter 键才触发抽屉搜索（去除了原本输入时的自动 input 监听）
 searchInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
         e.preventDefault();
@@ -1037,6 +1034,19 @@ function resetNoteSearch() {
     currentNoteSearchIndex = -1;
     if (noteSearchCount) noteSearchCount.textContent = '';
     removePreviewHighlights();
+}
+
+// 🔑 新增：退出搜索函数（清空输入框，取消选区与编辑框焦点）
+function exitNoteSearch() {
+    if (noteSearchInput) noteSearchInput.value = '';
+    resetNoteSearch();
+
+    if (currentMode === 'edit' && editor) {
+        // 清除编辑框高亮选区，取消焦距，恢复正常视图
+        const pos = editor.selectionEnd;
+        editor.setSelectionRange(pos, pos);
+        editor.blur();
+    }
 }
 
 function performNoteSearch() {
@@ -1140,7 +1150,7 @@ function removePreviewHighlights() {
     });
 }
 
-// 🔑 只有点击搜索按钮或按下 Enter 键时才触发笔记内搜索/跳转
+// 🔑 搜索与导航按钮监听
 if (btnNoteSearch) {
     btnNoteSearch.addEventListener('click', performNoteSearch);
 }
@@ -1168,6 +1178,11 @@ if (btnSearchNext) {
         currentNoteSearchIndex = (currentNoteSearchIndex + 1) % noteSearchMatches.length;
         jumpToNoteMatch();
     });
+}
+
+// 🔑 退出搜索按钮事件响应
+if (btnSearchExit) {
+    btnSearchExit.addEventListener('click', exitNoteSearch);
 }
 
 // ==================== Markdown 渲染与 Wiki 语法解析 ====================
