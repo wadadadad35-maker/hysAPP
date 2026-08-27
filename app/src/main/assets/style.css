@@ -181,6 +181,12 @@ mark.search-highlight.active {
     display: block; 
 }
 
+/* 🔑 编辑框选中文本高亮颜色（与预览模式的橙色背景一致） */
+#editor::selection {
+    background-color: #ff8c00;
+    color: #ffffff;
+}
+
 #preview { 
     width: 100%; 
     flex: 1;

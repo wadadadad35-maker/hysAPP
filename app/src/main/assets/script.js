@@ -59,7 +59,7 @@ const btnNoteSearch = document.getElementById('btn-note-search');
 const noteSearchCount = document.getElementById('note-search-count');
 const btnSearchPrev = document.getElementById('btn-search-prev');
 const btnSearchNext = document.getElementById('btn-search-next');
-const btnSearchExit = document.getElementById('btn-search-exit'); // 🔑 新增：退出搜索按钮
+const btnSearchExit = document.getElementById('btn-search-exit');
 
 // ==================== 全局状态与配置参数 ====================
 const PREV_TOUCH_RATIO = 0.3; 
@@ -117,6 +117,14 @@ function triggerDebouncedSave() {
 if (editor) {
     editor.addEventListener('input', () => {
         triggerDebouncedSave();
+    });
+    
+    // 🔑 手动点击编辑框打字时，恢复输入法调起机制
+    editor.addEventListener('touchstart', () => {
+        editor.removeAttribute('inputmode');
+    });
+    editor.addEventListener('mousedown', () => {
+        editor.removeAttribute('inputmode');
     });
 }
 
@@ -1036,15 +1044,16 @@ function resetNoteSearch() {
     removePreviewHighlights();
 }
 
-// 🔑 新增：退出搜索函数（清空输入框，取消选区与编辑框焦点）
 function exitNoteSearch() {
     if (noteSearchInput) noteSearchInput.value = '';
     resetNoteSearch();
 
     if (currentMode === 'edit' && editor) {
-        // 清除编辑框高亮选区，取消焦距，恢复正常视图
+        // 🔑 1. 取消选中选区
         const pos = editor.selectionEnd;
         editor.setSelectionRange(pos, pos);
+        // 🔑 2. 点击叉号退出时才失焦并移除 inputmode 限制
+        editor.removeAttribute('inputmode');
         editor.blur();
     }
 }
@@ -1090,6 +1099,10 @@ function jumpToNoteMatch() {
     }
 
     if (currentMode === 'edit') {
+        // 🔑 1. 设置 inputmode="none" 阻止软键盘自动弹出
+        editor.setAttribute('inputmode', 'none');
+
+        // 🔑 2. 保持 focus 并设置选区，防止编辑框失焦（blur）导致的高亮闪退
         editor.focus();
         editor.setSelectionRange(matchStart, matchEnd);
 
@@ -1180,7 +1193,6 @@ if (btnSearchNext) {
     });
 }
 
-// 🔑 退出搜索按钮事件响应
 if (btnSearchExit) {
     btnSearchExit.addEventListener('click', exitNoteSearch);
 }
