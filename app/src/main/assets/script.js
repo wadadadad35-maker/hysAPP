@@ -47,15 +47,19 @@ const btnModalCancel = document.getElementById('btn-modal-cancel');
 const btnModalConfirm = document.getElementById('btn-modal-confirm');
 
 const btnSave = document.getElementById('btn-save');
-// 🔑 替换原有的 btnExport 为 btnRefresh
 const btnRefresh = document.getElementById('btn-refresh');
 
 const modeToggleGroup = document.getElementById('mode-toggle-group');
 const btnModeEdit = document.getElementById('btn-mode-edit');
 const btnModePreview = document.getElementById('btn-mode-preview');
 
+// 🔑 新增：当前笔记内搜索 DOM 节点
+const noteSearchInput = document.getElementById('note-search-input');
+const noteSearchCount = document.getElementById('note-search-count');
+const btnSearchPrev = document.getElementById('btn-search-prev');
+const btnSearchNext = document.getElementById('btn-search-next');
+
 // ==================== 全局状态与配置参数 ====================
-// 🔑 自定义触碰翻页比例范围（0.3 表示顶部 30% 区域触发上一页，剩余 70% 触发下一页）
 const PREV_TOUCH_RATIO = 0.3; 
 
 const IMG_REGEX = /\.(png|jpg|jpeg|webp|gif|svg)$/i;
@@ -84,6 +88,10 @@ let lastRenderedText = '';
 let searchDebounceTimer = null;
 let saveDebounceTimer = null; 
 
+// 🔑 新增：笔记内搜索全局状态
+let noteSearchMatches = [];
+let currentNoteSearchIndex = -1;
+
 // ==================== 自动防抖保存机制 ====================
 function syncCurrentContent() {
     if (saveDebounceTimer) {
@@ -106,7 +114,12 @@ function triggerDebouncedSave() {
 }
 
 if (editor) {
-    editor.addEventListener('input', triggerDebouncedSave);
+    editor.addEventListener('input', () => {
+        triggerDebouncedSave();
+        if (noteSearchInput && noteSearchInput.value.trim()) {
+            performNoteSearch();
+        }
+    });
 }
 
 function truncateName(name, maxLength = 10) {
@@ -524,7 +537,6 @@ function hidePathModal() {
     }
 }
 
-// 🔑 修改：添加 isSilent 参数控制弹窗，并在成功读取时将路径写入 localStorage
 function executeFolderScan(inputPath, isSilent = false) {
     if (!inputPath || !inputPath.trim()) return;
 
@@ -532,7 +544,6 @@ function executeFolderScan(inputPath, isSilent = false) {
     currentRootFolderPath = folderPath;
     currentFolderPath = '';
 
-    // 🔑 记录当前路径到本地存储
     try {
         localStorage.setItem('last_folder_path', folderPath);
     } catch (e) {
@@ -589,7 +600,6 @@ if (customPathModal) {
     });
 }
 
-// 🔑 手动刷新目录按钮功能
 btnRefresh.addEventListener('click', () => {
     if (!currentRootFolderPath) {
         alert("请先打开本地文件夹！");
@@ -636,6 +646,13 @@ function loadMdContent(keyLower) {
     } else {
         editor.style.display = 'block';
         preview.style.display = 'none';
+    }
+
+    // 重新触发笔记内检索高亮
+    if (noteSearchInput && noteSearchInput.value.trim()) {
+        performNoteSearch();
+    } else {
+        resetNoteSearch();
     }
 }
 
@@ -881,7 +898,6 @@ function updateModalCounter() {
     }
 }
 
-// 边界拦截切图函数
 function switchMedia(direction) {
     if (!currentMediaList || currentMediaList.length === 0) return;
 
@@ -903,7 +919,6 @@ function switchMedia(direction) {
     }
 }
 
-// 点击图片直接放大进入大图弹窗
 imgDisplay.addEventListener('click', (e) => {
     e.stopPropagation();
     openImageModal();
@@ -911,7 +926,6 @@ imgDisplay.addEventListener('click', (e) => {
 
 btnZoomImg.addEventListener('click', openImageModal);
 
-// 常规预览区域点击空白/空白边缘时按 PREV_TOUCH_RATIO 翻页
 mediaViewer.addEventListener('click', (e) => {
     if (e.target.closest('button') || e.target.closest('.media-btn') || e.target.tagName === 'VIDEO' || e.target === imgDisplay) {
         return;
@@ -927,7 +941,6 @@ mediaViewer.addEventListener('click', (e) => {
     }
 });
 
-// 大图弹窗点击：根据 PREV_TOUCH_RATIO 配置比例区分上一页与下一页
 imageModal.addEventListener('click', (e) => {
     if (e.target === modalClose) {
         imageModal.style.display = 'none';
@@ -979,7 +992,7 @@ btnScrollBottom.addEventListener('click', () => {
     else preview.scrollTop = preview.scrollHeight;
 });
 
-// ==================== 搜索逻辑 ====================
+// ==================== 抽屉内目录搜索逻辑 ====================
 function performSearch() {
     const query = searchInput.value.toLowerCase().trim();
     const allElements = document.querySelectorAll('#bottom-sheet .tree-folder, #bottom-sheet .tree-file');
@@ -1018,6 +1031,144 @@ searchInput.addEventListener('input', () => {
     clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(performSearch, 200);
 });
+
+// ==================== 🔑 当前笔记内文本搜索功能 ====================
+function resetNoteSearch() {
+    noteSearchMatches = [];
+    currentNoteSearchIndex = -1;
+    if (noteSearchCount) noteSearchCount.textContent = '';
+    removePreviewHighlights();
+}
+
+function performNoteSearch() {
+    const query = noteSearchInput ? noteSearchInput.value : '';
+    noteSearchMatches = [];
+    currentNoteSearchIndex = -1;
+
+    if (!query || !currentFileKey || !editor) {
+        resetNoteSearch();
+        return;
+    }
+
+    const text = editor.value;
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+
+    let pos = lowerText.indexOf(lowerQuery);
+    while (pos !== -1) {
+        noteSearchMatches.push(pos);
+        pos = lowerText.indexOf(lowerQuery, pos + 1);
+    }
+
+    if (noteSearchMatches.length > 0) {
+        currentNoteSearchIndex = 0;
+        jumpToNoteMatch();
+    } else {
+        if (noteSearchCount) noteSearchCount.textContent = '0/0';
+        removePreviewHighlights();
+    }
+}
+
+function jumpToNoteMatch() {
+    if (currentNoteSearchIndex < 0 || currentNoteSearchIndex >= noteSearchMatches.length) return;
+
+    const query = noteSearchInput.value;
+    const matchStart = noteSearchMatches[currentNoteSearchIndex];
+    const matchEnd = matchStart + query.length;
+
+    if (noteSearchCount) {
+        noteSearchCount.textContent = `${currentNoteSearchIndex + 1}/${noteSearchMatches.length}`;
+    }
+
+    if (currentMode === 'edit') {
+        editor.focus();
+        editor.setSelectionRange(matchStart, matchEnd);
+
+        // 智能定位：按文本所在行数计算比例并居中滚动
+        const textBefore = editor.value.substring(0, matchStart);
+        const lineNumber = textBefore.split('\n').length;
+        const totalLines = editor.value.split('\n').length;
+        const lineRatio = (lineNumber - 1) / Math.max(1, totalLines);
+        
+        editor.scrollTop = Math.max(0, lineRatio * editor.scrollHeight - (editor.clientHeight / 2));
+    } else {
+        highlightInPreview(query);
+    }
+}
+
+function highlightInPreview(query) {
+    removePreviewHighlights();
+    if (!query) return;
+
+    const safeQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${safeQuery})`, 'gi');
+
+    const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT, null, false);
+    const nodesToReplace = [];
+    
+    while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (node.parentElement.tagName !== 'SCRIPT' && node.parentElement.tagName !== 'STYLE') {
+            if (regex.test(node.nodeValue)) {
+                nodesToReplace.push(node);
+            }
+        }
+    }
+
+    let matchCount = 0;
+    nodesToReplace.forEach(node => {
+        const span = document.createElement('span');
+        span.innerHTML = node.nodeValue.replace(regex, (match) => {
+            const isCurrent = matchCount === currentNoteSearchIndex;
+            matchCount++;
+            return `<mark class="search-highlight ${isCurrent ? 'active' : ''}">${match}</mark>`;
+        });
+        node.parentElement.replaceChild(span, node);
+    });
+
+    const activeMark = preview.querySelector('mark.search-highlight.active');
+    if (activeMark) {
+        activeMark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+}
+
+function removePreviewHighlights() {
+    const marks = preview.querySelectorAll('mark.search-highlight');
+    marks.forEach(mark => {
+        const parent = mark.parentElement;
+        parent.replaceChild(document.createTextNode(mark.textContent), mark);
+        parent.normalize();
+    });
+}
+
+if (noteSearchInput) {
+    noteSearchInput.addEventListener('input', performNoteSearch);
+    noteSearchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (noteSearchMatches.length > 0) {
+                currentNoteSearchIndex = (currentNoteSearchIndex + 1) % noteSearchMatches.length;
+                jumpToNoteMatch();
+            }
+        }
+    });
+}
+
+if (btnSearchPrev) {
+    btnSearchPrev.addEventListener('click', () => {
+        if (noteSearchMatches.length === 0) return;
+        currentNoteSearchIndex = (currentNoteSearchIndex - 1 + noteSearchMatches.length) % noteSearchMatches.length;
+        jumpToNoteMatch();
+    });
+}
+
+if (btnSearchNext) {
+    btnSearchNext.addEventListener('click', () => {
+        if (noteSearchMatches.length === 0) return;
+        currentNoteSearchIndex = (currentNoteSearchIndex + 1) % noteSearchMatches.length;
+        jumpToNoteMatch();
+    });
+}
 
 // ==================== Markdown 渲染与 Wiki 语法解析 ====================
 function parseObsidianLinks(rawText) {
@@ -1086,12 +1237,14 @@ function renderMarkdown() {
     if (typeof marked !== 'undefined') {
         preview.innerHTML = marked.parse(processedText, { breaks: true });
     }
-    lastRenderedText = rawText; 
+    lastRenderedText = rawText;
+
+    if (noteSearchInput && noteSearchInput.value.trim() && currentMode === 'preview') {
+        jumpToNoteMatch();
+    }
 }
 
-// 文本预览区（#preview）事件委托：点击 Wiki 链接跳转，点击渲染图片按照当前笔记顺序全屏查看
 preview.addEventListener('click', (e) => {
-    // 1. 处理双链 Wiki 文本跳转
     const wikiLink = e.target.closest('a.wiki-link');
     if (wikiLink && wikiLink.dataset.key) {
         e.preventDefault();
@@ -1099,7 +1252,6 @@ preview.addEventListener('click', (e) => {
         return;
     }
 
-    // 2. 处理预览图片点击进入大图弹窗，并按笔记内部图片出现的顺序建立切图目录
     const clickedImg = e.target.closest('img');
     if (clickedImg) {
         e.stopPropagation();
@@ -1130,7 +1282,6 @@ preview.addEventListener('click', (e) => {
     }
 });
 
-// 模式切换
 btnModeEdit.addEventListener('click', () => {
     syncCurrentContent();
     currentMode = 'edit';
@@ -1139,6 +1290,9 @@ btnModeEdit.addEventListener('click', () => {
     mediaViewer.style.display = 'none';
     editor.style.display = 'block';
     preview.style.display = 'none';
+    if (noteSearchInput && noteSearchInput.value.trim()) {
+        performNoteSearch();
+    }
 });
 
 btnModePreview.addEventListener('click', () => {
@@ -1152,11 +1306,9 @@ btnModePreview.addEventListener('click', () => {
     renderMarkdown();
 });
 
-// ==================== 🔑 页面自动初始化：加载上次路径 ====================
 window.addEventListener('DOMContentLoaded', () => {
     const savedPath = localStorage.getItem('last_folder_path');
     if (savedPath) {
-        // 传入 true，表示静默静默加载，不弹窗打扰
         executeFolderScan(savedPath, true);
     }
 });

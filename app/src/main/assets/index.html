@@ -9,7 +9,7 @@
     <script src="marked.min.js"></script>
     
     <!-- 引入外部 CSS 样式 -->
-    <link rel="stylesheet" href="style.css?v=6">
+    <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 
@@ -28,8 +28,15 @@
                     <button class="mode-btn" id="btn-mode-preview">预览</button>
                 </div>
                 <button class="btn btn-save" id="btn-save" disabled>保存</button>
-                <!-- 🔑 将原有的导出按钮替换为刷新目录按钮 -->
                 <button class="btn btn-refresh" id="btn-refresh">🔄 刷新目录</button>
+                
+                <!-- 🔑 当前笔记内搜索组件 -->
+                <div class="note-search-box">
+                    <input type="text" id="note-search-input" placeholder="🔍 搜当前笔记...">
+                    <span id="note-search-count"></span>
+                    <button class="btn btn-subtle btn-search-nav" id="btn-search-prev" title="上一个">▲</button>
+                    <button class="btn btn-subtle btn-search-nav" id="btn-search-next" title="下一个">▼</button>
+                </div>
             </div>
         </div>
 
@@ -108,7 +115,7 @@
         <img id="modal-img" src="" alt="全屏大图">
     </div>
 
-    <!-- 自定义路径输入弹窗 (替代原生 prompt，彻底去除 file:// 网址提示栏) -->
+    <!-- 自定义路径输入弹窗 -->
     <div id="custom-path-modal" class="custom-modal-overlay">
         <div class="custom-modal-content">
             <div class="custom-modal-header">📂 打开本地文件夹</div>
@@ -123,6 +130,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=7"></script>
+    <script src="script.js?v=8"></script>
 </body>
 </html>
