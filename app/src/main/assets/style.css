@@ -181,8 +181,14 @@ mark.search-highlight.active {
     display: block; 
 }
 
-/* 🔑 编辑框选中文本高亮颜色（与预览模式的橙色背景一致） */
+/* 🔑 1. 默认普通手动选中文本：系统标准蓝色高亮 */
 #editor::selection {
+    background-color: #007acc;
+    color: #ffffff;
+}
+
+/* 🔑 2. 只有在搜索跳转匹配时：显示橙色高亮 */
+#editor.is-searching::selection {
     background-color: #ff8c00;
     color: #ffffff;
 }

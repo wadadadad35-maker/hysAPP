@@ -116,14 +116,17 @@ function triggerDebouncedSave() {
 
 if (editor) {
     editor.addEventListener('input', () => {
+        editor.classList.remove('is-searching');
         triggerDebouncedSave();
     });
     
-    // 🔑 手动点击编辑框打字时，恢复输入法调起机制
+    // 🔑 手动点击编辑框打字时，恢复输入法调起机制并清除搜索状态
     editor.addEventListener('touchstart', () => {
+        editor.classList.remove('is-searching');
         editor.removeAttribute('inputmode');
     });
     editor.addEventListener('mousedown', () => {
+        editor.classList.remove('is-searching');
         editor.removeAttribute('inputmode');
     });
 }
@@ -1041,6 +1044,10 @@ function resetNoteSearch() {
     noteSearchMatches = [];
     currentNoteSearchIndex = -1;
     if (noteSearchCount) noteSearchCount.textContent = '';
+    
+    // 🔑 恢复普通蓝色多选状态
+    if (editor) editor.classList.remove('is-searching');
+    
     removePreviewHighlights();
 }
 
@@ -1099,6 +1106,9 @@ function jumpToNoteMatch() {
     }
 
     if (currentMode === 'edit') {
+        // 🔑 标记处于搜索状态，触发 ::selection 的橙色高亮
+        editor.classList.add('is-searching');
+
         // 🔑 1. 设置 inputmode="none" 阻止软键盘自动弹出
         editor.setAttribute('inputmode', 'none');
 
