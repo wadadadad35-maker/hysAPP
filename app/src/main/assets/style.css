@@ -188,10 +188,12 @@ mark.search-highlight.active {
 }
 
 /* 🔑 2. 只有在搜索跳转匹配时：显示橙色高亮 */
-#editor.is-searching::selection {
-    background-color: #ff8c00;
-    color: #ffffff;
+/* 🔑 2. 只有在搜索跳转匹配时：显示柔和半透明蓝高亮 */
+#editor.is-searching ::selection, #editor.is-searching *::selection {
+    background-color: rgba(0, 122, 204, 0.4) !important;
+    color: #ffffff !important;
 }
+
 
 #preview { 
     width: 100%; 
