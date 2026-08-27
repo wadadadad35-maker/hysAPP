@@ -182,9 +182,9 @@ mark.search-highlight.active {
 }
 
 /* 🔑 1. 默认普通手动选中文本：系统标准蓝色高亮 */
-#editor::selection {
-    background-color: #007acc;
-    color: #ffffff;
+#editor ::selection, #editor *::selection {
+    background-color: rgba(0, 122, 204, 0.35) !important;
+    color: #ffffff !important;
 }
 
 /* 🔑 2. 只有在搜索跳转匹配时：显示橙色高亮 */
