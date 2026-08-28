@@ -6,6 +6,8 @@ const btnCloseDrawer = document.getElementById('btn-close-drawer');
 
 const btnCreateFile = document.getElementById('btn-create-file');
 const btnCreateFolder = document.getElementById('btn-create-folder');
+const btnCut = document.getElementById('btn-cut');
+const btnPaste = document.getElementById('btn-paste');
 const btnRenameFile = document.getElementById('btn-rename-file');
 const btnRenameFolder = document.getElementById('btn-rename-folder');
 const btnDeleteFile = document.getElementById('btn-delete-file');
@@ -89,6 +91,9 @@ let lastRenderedText = '';
 
 let saveDebounceTimer = null; 
 
+// 剪贴板全局状态
+let clipboardItem = null;
+
 // 笔记内搜索全局状态
 let noteSearchMatches = [];
 let currentNoteSearchIndex = -1;
@@ -120,7 +125,6 @@ if (editor) {
         triggerDebouncedSave();
     });
     
-    // 🔑 手动点击编辑框打字时，恢复输入法调起机制并清除搜索状态
     editor.addEventListener('touchstart', () => {
         editor.classList.remove('is-searching');
         editor.removeAttribute('inputmode');
@@ -485,6 +489,8 @@ function setupTreeDelegation(containerEl) {
 
             if (li && li.dataset.folderPath) {
                 currentFolderPath = li.dataset.folderPath;
+                currentFileKey = ''; // 选中文件夹时取消文件选中状态
+                document.querySelectorAll('.tree-file').forEach(el => el.classList.remove('active'));
                 document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('active'));
                 folderHeader.classList.add('active');
             }
@@ -502,6 +508,9 @@ function setupTreeDelegation(containerEl) {
         const fileLi = e.target.closest('.tree-file');
         if (fileLi && fileLi._fileItem) {
             e.stopPropagation();
+            currentFolderPath = ''; // 选中文件时清除文件夹独占高亮
+            document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('active'));
+
             const item = fileLi._fileItem;
             if (item.isMedia) {
                 previewMedia(item.keyLower, item.name, item.path, item.isVideo);
@@ -851,6 +860,95 @@ btnDeleteFolder.addEventListener('click', () => {
     rescanDirectorySilently();
 });
 
+// ==================== 剪切与粘贴功能 ====================
+if (btnCut) {
+    btnCut.addEventListener('click', () => {
+        syncCurrentContent();
+
+        // 🔑 重复剪切判断：再次点击已剪切的项时，退出/取消剪切
+        if (clipboardItem) {
+            const currentItem = currentFileKey ? fileDataMap.get(currentFileKey) : null;
+            const isSameFile = currentItem && clipboardItem.type === 'file' && clipboardItem.relativePath === currentItem.path;
+            const isSameFolder = !currentItem && currentFolderPath && clipboardItem.type === 'folder' && clipboardItem.relativePath === currentFolderPath;
+
+            if (isSameFile || isSameFolder) {
+                clipboardItem = null; // 1. 清空剪贴板
+                if (btnPaste) {
+                    btnPaste.setAttribute('disabled', 'true'); // 2. 禁用粘贴按钮
+                    btnPaste.style.background = ''; // 3. 恢复默认灰色样式
+                }
+                alert('已取消剪切！');
+                return;
+            }
+        }
+
+        if (currentFileKey) {
+            const item = fileDataMap.get(currentFileKey);
+            clipboardItem = {
+                type: 'file',
+                relativePath: item.path,
+                fullPath: item.fullPath,
+                name: item.name
+            };
+            alert(`已剪切文件："${item.name}"\n再次点击可取消剪切；或选择目标文件夹后点击“粘贴”`);
+        } else if (currentFolderPath) {
+            const parts = currentFolderPath.split('/');
+            const folderName = parts[parts.length - 1];
+            clipboardItem = {
+                type: 'folder',
+                relativePath: currentFolderPath,
+                fullPath: currentRootFolderPath + '/' + currentFolderPath,
+                name: folderName
+            };
+            alert(`已剪切文件夹："${folderName}"\n再次点击可取消剪切；或选择目标文件夹后点击“粘贴”`);
+        } else {
+            alert('请先选择要剪切的文件或文件夹！');
+            return;
+        }
+
+        if (btnPaste) {
+            btnPaste.removeAttribute('disabled');
+            btnPaste.style.background = '#0e639c';
+        }
+    });
+}
+
+if (btnPaste) {
+    btnPaste.addEventListener('click', () => {
+        if (!clipboardItem) {
+            alert('剪贴板为空！');
+            return;
+        }
+
+        const targetFolder = currentFolderPath ? currentFolderPath : '';
+        const newRelativePath = targetFolder ? `${targetFolder}/${clipboardItem.name}` : clipboardItem.name;
+        const newFullPath = currentRootFolderPath + '/' + newRelativePath;
+
+        if (clipboardItem.relativePath === newRelativePath) {
+            alert('源路径与目标路径一致，无需移动！');
+            return;
+        }
+
+        if (clipboardItem.type === 'folder' && newRelativePath.startsWith(clipboardItem.relativePath + '/')) {
+            alert('不能将文件夹移动到其自身的子文件夹内！');
+            return;
+        }
+
+        if (window.AndroidFS && window.AndroidFS.renameFileOrFolder(clipboardItem.fullPath, newFullPath)) {
+            alert('移动成功！');
+            
+            clipboardItem = null;
+            btnPaste.setAttribute('disabled', 'true');
+            btnPaste.style.background = '';
+            currentFolderPath = '';
+            
+            rescanDirectorySilently();
+        } else {
+            alert('移动失败，请检查文件系统权限或目标路径是否存在同名文件！');
+        }
+    });
+}
+
 // ==================== 媒体预览、大图与上下触碰切图 ====================
 function previewMedia(keyLower, fileName, displayPath, isVideo) {
     syncCurrentContent();
@@ -1045,7 +1143,6 @@ function resetNoteSearch() {
     currentNoteSearchIndex = -1;
     if (noteSearchCount) noteSearchCount.textContent = '';
     
-    // 🔑 恢复普通蓝色多选状态
     if (editor) editor.classList.remove('is-searching');
     
     removePreviewHighlights();
@@ -1056,10 +1153,8 @@ function exitNoteSearch() {
     resetNoteSearch();
 
     if (currentMode === 'edit' && editor) {
-        // 🔑 1. 取消选中选区
         const pos = editor.selectionEnd;
         editor.setSelectionRange(pos, pos);
-        // 🔑 2. 点击叉号退出时才失焦并移除 inputmode 限制
         editor.removeAttribute('inputmode');
         editor.blur();
     }
@@ -1106,17 +1201,12 @@ function jumpToNoteMatch() {
     }
 
     if (currentMode === 'edit') {
-        // 🔑 标记处于搜索状态，触发 ::selection 的橙色高亮
         editor.classList.add('is-searching');
-
-        // 🔑 1. 设置 inputmode="none" 阻止软键盘自动弹出
         editor.setAttribute('inputmode', 'none');
 
-        // 🔑 2. 保持 focus 并设置选区，防止编辑框失焦（blur）导致的高亮闪退
         editor.focus();
         editor.setSelectionRange(matchStart, matchEnd);
 
-        // 按文本所在行数计算比例并滚动居中
         const textBefore = editor.value.substring(0, matchStart);
         const lineNumber = textBefore.split('\n').length;
         const totalLines = editor.value.split('\n').length;
@@ -1173,7 +1263,6 @@ function removePreviewHighlights() {
     });
 }
 
-// 🔑 搜索与导航按钮监听
 if (btnNoteSearch) {
     btnNoteSearch.addEventListener('click', performNoteSearch);
 }

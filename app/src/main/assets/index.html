@@ -9,7 +9,7 @@
     <script src="marked.min.js"></script>
     
     <!-- 引入外部 CSS 样式 -->
-    <link rel="stylesheet" href="style.css?v=7">
+    <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 
@@ -30,7 +30,7 @@
                 <button class="btn btn-save" id="btn-save" disabled>保存</button>
                 <button class="btn btn-refresh" id="btn-refresh">🔄 刷新目录</button>
                 
-                <!-- 当前笔记内搜索组件（已添加 ✖ 退出搜索按钮） -->
+                <!-- 当前笔记内搜索组件 -->
                 <div class="note-search-box">
                     <input type="text" id="note-search-input" placeholder="🔍 搜当前笔记...">
                     <button class="btn btn-subtle btn-search-nav" id="btn-note-search" title="搜索">🔍</button>
@@ -100,6 +100,10 @@
                 <button class="btn btn-create" id="btn-create-folder">➕ 新文件夹</button>
             </div>
             <div class="footer-row">
+                <button class="btn btn-subtle" id="btn-cut">✂️ 剪切文件/文件夹</button>
+                <button class="btn btn-subtle" id="btn-paste" disabled>📋 粘贴到此目录</button>
+            </div>
+            <div class="footer-row">
                 <button class="btn btn-subtle" id="btn-rename-file">✏️ 重命名文件</button>
                 <button class="btn btn-subtle" id="btn-rename-folder">✏️ 重命名文件夹</button>
             </div>
@@ -132,6 +136,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=9"></script>
+    <script src="script.js?v=10"></script>
 </body>
 </html>

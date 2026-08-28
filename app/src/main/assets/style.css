@@ -255,8 +255,6 @@ mark.search-highlight.active {
     opacity: 0; 
     pointer-events: none; 
     transition: opacity 0.3s ease; 
-
-    /* 🔑 GPU 硬件加速：优化遮罩淡入淡出动效 */
     will-change: opacity;
 }
 #drawer-overlay.active { opacity: 1; pointer-events: auto; }
@@ -280,8 +278,6 @@ mark.search-highlight.active {
     flex-direction: column; 
     box-shadow: 4px 0 20px rgba(0,0,0,0.5); 
     overflow: hidden;
-
-    /* 🔑 GPU 硬件加速：强制分配 GPU 独立合成图层，消除掉帧与卡顿 */
     will-change: transform;
     -webkit-backface-visibility: hidden;
     backface-visibility: hidden;
@@ -327,6 +323,12 @@ mark.search-highlight.active {
     padding: 7px 10px;
     font-size: 12px;
     flex: 0 0 auto;
+}
+
+#btn-paste:disabled {
+    background: #444 !important;
+    color: #888 !important;
+    cursor: not-allowed;
 }
 
 .btn-create { background: #0e639c; }
@@ -389,6 +391,11 @@ mark.search-highlight.active {
 .tree-folder > .folder-header:hover,
 .tree-file:hover {
     background: rgba(255, 255, 255, 0.08);
+}
+
+.tree-folder > .folder-header.active {
+    background: rgba(0, 122, 204, 0.35);
+    color: #4fc1ff;
 }
 
 .tree-file.active {
