@@ -71,7 +71,7 @@ body { display: flex; flex-direction: column; }
 .mode-btn { background: transparent; color: #888; border: none; padding: 4px 8px; font-size: 12px; cursor: pointer; border-radius: 3px; }
 .mode-btn.active { background: #0e639c; color: #fff; font-weight: bold; }
 
-/* 🔑 当前笔记内搜索控件 */
+/* 当前笔记内搜索控件 */
 .note-search-box {
     display: flex;
     align-items: center;
@@ -181,19 +181,17 @@ mark.search-highlight.active {
     display: block; 
 }
 
-/* 🔑 1. 默认普通手动选中文本：系统标准蓝色高亮 */
+/* 1. 默认普通手动选中文本：系统标准蓝色高亮 */
 #editor ::selection, #editor *::selection {
     background-color: rgba(0, 122, 204, 0.35) !important;
     color: #ffffff !important;
 }
 
-/* 🔑 2. 只有在搜索跳转匹配时：显示橙色高亮 */
-/* 🔑 2. 只有在搜索跳转匹配时：显示柔和半透明蓝高亮 */
+/* 2. 只有在搜索跳转匹配时：显示柔合半透明蓝高亮 */
 #editor.is-searching ::selection, #editor.is-searching *::selection {
     background-color: rgba(0, 122, 204, 0.4) !important;
     color: #ffffff !important;
 }
-
 
 #preview { 
     width: 100%; 
@@ -257,6 +255,9 @@ mark.search-highlight.active {
     opacity: 0; 
     pointer-events: none; 
     transition: opacity 0.3s ease; 
+
+    /* 🔑 GPU 硬件加速：优化遮罩淡入淡出动效 */
+    will-change: opacity;
 }
 #drawer-overlay.active { opacity: 1; pointer-events: auto; }
 
@@ -273,14 +274,19 @@ mark.search-highlight.active {
     border-top-right-radius: 12px; 
     border-bottom-right-radius: 12px; 
     z-index: 101; 
-    transform: translateX(-100%); 
+    transform: translateX(-100%) translateZ(0); 
     transition: transform 0.3s cubic-bezier(0.1, 0.9, 0.2, 1); 
     display: flex; 
     flex-direction: column; 
     box-shadow: 4px 0 20px rgba(0,0,0,0.5); 
     overflow: hidden;
+
+    /* 🔑 GPU 硬件加速：强制分配 GPU 独立合成图层，消除掉帧与卡顿 */
+    will-change: transform;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
 }
-#bottom-sheet.active { transform: translateX(0); }
+#bottom-sheet.active { transform: translateX(0) translateZ(0); }
 
 .sheet-header { 
     padding: 12px 16px; 
