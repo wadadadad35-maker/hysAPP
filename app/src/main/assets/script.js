@@ -94,6 +94,7 @@ let currentRootFolderPath = '';
 let currentMediaList = [];
 let currentMediaIndex = -1;
 let currentModalMode = 'paged'; // 大图模式: 'paged' (翻页) 或 'stream' (流式滑动)
+let streamObserver = null;      // 交叉观察器 (用于流式模式下的滚动进度实时监听)
 let lastRenderedText = '';
 
 let saveDebounceTimer = null; 
@@ -998,6 +999,32 @@ function openImageModal() {
     switchModalMode(currentModalMode);
 }
 
+// 交叉观察器：实时监听滑动位置并同步 currentMediaIndex
+function initStreamObserver() {
+    if (streamObserver) {
+        streamObserver.disconnect();
+    }
+
+    streamObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const idx = parseInt(entry.target.dataset.index, 10);
+                if (!isNaN(idx) && idx !== currentMediaIndex) {
+                    currentMediaIndex = idx; // 实时写回全局阅读状态
+                    updateModalCounter();    // 实时更新顶部页码显示 (X / N)
+                }
+            }
+        });
+    }, {
+        root: modalStreamView,
+        rootMargin: '-40% 0px -40% 0px', // 仅将屏幕垂直方向中间 20% 的区域作为判定判定触发口
+        threshold: 0
+    });
+
+    const imgs = modalStreamView.querySelectorAll('img');
+    imgs.forEach(img => streamObserver.observe(img));
+}
+
 function renderModalStreamView() {
     modalStreamView.innerHTML = '';
     if (!currentMediaList) return;
@@ -1019,18 +1046,27 @@ function renderModalStreamView() {
     const targetEl = document.getElementById('target-stream-img');
     if (targetEl) {
         setTimeout(() => {
-            targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            targetEl.scrollIntoView({ behavior: 'auto', block: 'center' });
+            initStreamObserver(); // 页面定位滚动完成后再开启位置监听
         }, 50);
+    } else {
+        initStreamObserver();
     }
 }
 
 function switchModalMode(mode) {
     currentModalMode = mode;
     if (mode === 'paged') {
+        if (streamObserver) {
+            streamObserver.disconnect();
+            streamObserver = null;
+        }
+
         btnModalPaged.classList.add('active');
         btnModalStream.classList.remove('active');
         modalPagedView.style.display = 'flex';
         modalStreamView.style.display = 'none';
+
         if (currentMediaList && currentMediaIndex >= 0) {
             const currentItem = currentMediaList[currentMediaIndex];
             const url = currentItem.srcUrl || mediaUrlsMap.get(currentItem.keyLower) || '';
@@ -1109,6 +1145,10 @@ mediaViewer.addEventListener('click', (e) => {
 
 imageModal.addEventListener('click', (e) => {
     if (e.target === modalClose) {
+        if (streamObserver) {
+            streamObserver.disconnect();
+            streamObserver = null;
+        }
         imageModal.style.display = 'none';
         return;
     }
@@ -1130,6 +1170,10 @@ imageModal.addEventListener('click', (e) => {
 });
 
 modalClose.addEventListener('click', () => {
+    if (streamObserver) {
+        streamObserver.disconnect();
+        streamObserver = null;
+    }
     imageModal.style.display = 'none';
 });
 
