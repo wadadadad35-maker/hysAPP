@@ -142,6 +142,12 @@
             <div class="custom-modal-body">
                 <label for="modal-path-input">请输入手机本地文件夹绝对路径：</label>
                 <input type="text" id="modal-path-input" placeholder="例如: /sdcard/Documents/Notes">
+                
+                <!-- 最近路径控件 -->
+                <div class="recent-paths-container">
+                    <button type="button" class="btn btn-subtle btn-recent" id="btn-show-recent">🕒 最近路径</button>
+                    <div id="recent-paths-list" class="recent-paths-list" style="display: none;"></div>
+                </div>
             </div>
             <div class="custom-modal-footer">
                 <button class="btn btn-subtle" id="btn-modal-cancel">取消</button>

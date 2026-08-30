@@ -54,6 +54,10 @@ const modalPathInput = document.getElementById('modal-path-input');
 const btnModalCancel = document.getElementById('btn-modal-cancel');
 const btnModalConfirm = document.getElementById('btn-modal-confirm');
 
+// 最近路径 DOM 节点
+const btnShowRecent = document.getElementById('btn-show-recent');
+const recentPathsList = document.getElementById('recent-paths-list');
+
 const btnSave = document.getElementById('btn-save');
 const btnRefresh = document.getElementById('btn-refresh');
 
@@ -105,6 +109,59 @@ let clipboardItem = null;
 // 笔记内搜索全局状态
 let noteSearchMatches = [];
 let currentNoteSearchIndex = -1;
+
+// ==================== 最近路径读写逻辑 ====================
+function getRecentPaths() {
+    try {
+        const json = localStorage.getItem('recent_folder_paths');
+        return json ? JSON.parse(json) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function saveRecentPath(newPath) {
+    if (!newPath) return;
+    let paths = getRecentPaths();
+    
+    // 过滤重复路径（忽略大小写与末尾斜杠）
+    const cleanNew = newPath.toLowerCase().replace(/\/+$/, '');
+    paths = paths.filter(p => p.toLowerCase().replace(/\/+$/, '') !== cleanNew);
+    
+    paths.unshift(newPath); // 最新的放在第一个
+    paths = paths.slice(0, 3); // 限制最多保留3个
+    
+    try {
+        localStorage.setItem('recent_folder_paths', JSON.stringify(paths));
+    } catch (e) {
+        console.error('保存最近路径失败:', e);
+    }
+}
+
+function renderRecentPaths() {
+    if (!recentPathsList) return;
+    const paths = getRecentPaths();
+    recentPathsList.innerHTML = '';
+
+    if (paths.length === 0) {
+        recentPathsList.innerHTML = '<div class="recent-path-empty">暂无历史路径记录</div>';
+        return;
+    }
+
+    paths.forEach(path => {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'recent-path-item';
+        itemEl.innerHTML = `<span style="font-size:12px;">📂</span><span style="flex:1;">${path}</span>`;
+        
+        itemEl.addEventListener('click', () => {
+            if (modalPathInput) modalPathInput.value = path;
+            hidePathModal();
+            executeFolderScan(path);
+        });
+
+        recentPathsList.appendChild(itemEl);
+    });
+}
 
 // ==================== 自动防抖保存机制 ====================
 function syncCurrentContent() {
@@ -549,6 +606,9 @@ function showPathModal() {
     if (modalPathInput) {
         modalPathInput.value = currentRootFolderPath || "/sdcard/Documents/";
     }
+    if (recentPathsList) {
+        recentPathsList.style.display = 'none'; // 切换显示前重置隐藏最近列表
+    }
     if (customPathModal) {
         customPathModal.classList.add('active');
         setTimeout(() => {
@@ -572,6 +632,7 @@ function executeFolderScan(inputPath, isSilent = false) {
 
     try {
         localStorage.setItem('last_folder_path', folderPath);
+        saveRecentPath(folderPath); // 保存至最近打开记录
     } catch (e) {
         console.error('无法保存路径到缓存:', e);
     }
@@ -594,6 +655,18 @@ function executeFolderScan(inputPath, isSilent = false) {
 }
 
 btnTriggerFolder.addEventListener('click', showPathModal);
+
+if (btnShowRecent) {
+    btnShowRecent.addEventListener('click', () => {
+        const isHidden = recentPathsList.style.display === 'none';
+        if (isHidden) {
+            renderRecentPaths();
+            recentPathsList.style.display = 'flex';
+        } else {
+            recentPathsList.style.display = 'none';
+        }
+    });
+}
 
 if (btnModalCancel) {
     btnModalCancel.addEventListener('click', hidePathModal);
@@ -1017,7 +1090,7 @@ function initStreamObserver() {
         });
     }, {
         root: modalStreamView,
-        rootMargin: '-40% 0px -40% 0px', // 仅将屏幕垂直方向中间 20% 的区域作为判定判定触发口
+        rootMargin: '-40% 0px -40% 0px', // 仅将屏幕垂直方向中间 20% 的区域作为判定触发口
         threshold: 0
     });
 

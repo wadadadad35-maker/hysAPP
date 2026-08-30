@@ -657,3 +657,64 @@ mark.search-highlight.active {
     padding: 8px 16px;
     font-size: 13px;
 }
+
+/* 最近路径控件样式 */
+.recent-paths-container {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.btn-recent {
+    font-size: 11px !important;
+    padding: 4px 8px !important;
+    align-self: flex-start;
+    background: #333333;
+    color: #4fc1ff;
+    border: 1px solid #3c3c3c;
+    border-radius: 4px;
+}
+
+.btn-recent:active {
+    background: #0e639c;
+    color: #fff;
+}
+
+.recent-paths-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: #1e1e1e;
+    border: 1px solid #3c3c3c;
+    border-radius: 6px;
+    padding: 6px;
+    max-height: 130px;
+    overflow-y: auto;
+}
+
+.recent-path-item {
+    padding: 6px 8px;
+    font-size: 12px;
+    color: #d4d4d4;
+    background: #2d2d2d;
+    border-radius: 4px;
+    cursor: pointer;
+    word-break: break-all;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.15s ease;
+}
+
+.recent-path-item:hover, .recent-path-item:active {
+    background: #0e639c;
+    color: #ffffff;
+}
+
+.recent-path-empty {
+    font-size: 12px;
+    color: #888;
+    text-align: center;
+    padding: 6px 0;
+}
