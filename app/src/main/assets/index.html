@@ -9,7 +9,7 @@
     <script src="marked.min.js"></script>
     
     <!-- 引入外部 CSS 样式 -->
-    <link rel="stylesheet" href="style.css?v=8">
+    <link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
 
@@ -117,8 +117,22 @@
     <!-- 全屏大图预览弹窗 (Lightbox) -->
     <div id="image-modal">
         <div class="modal-counter" id="modal-counter"></div>
+
+        <!-- 顶部模式切换控件 -->
+        <div class="modal-mode-switch">
+            <button class="modal-mode-btn active" id="btn-modal-paged">翻页模式</button>
+            <button class="modal-mode-btn" id="btn-modal-stream">流式滑动</button>
+        </div>
+
         <span class="modal-close" id="modal-close">&times;</span>
-        <img id="modal-img" src="" alt="全屏大图">
+
+        <!-- 单页点击翻页视图 -->
+        <div id="modal-paged-view" class="modal-view">
+            <img id="modal-img" src="" alt="全屏大图">
+        </div>
+
+        <!-- 流式上下滑动视图 -->
+        <div id="modal-stream-view" class="modal-view" style="display: none;"></div>
     </div>
 
     <!-- 自定义路径输入弹窗 -->
@@ -136,6 +150,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=10"></script>
+    <script src="script.js?v=11"></script>
 </body>
 </html>

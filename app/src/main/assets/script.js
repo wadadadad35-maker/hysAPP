@@ -42,6 +42,12 @@ const modalImg = document.getElementById('modal-img');
 const modalClose = document.getElementById('modal-close');
 const modalCounter = document.getElementById('modal-counter');
 
+// Modal 双视图与模式切换节点
+const btnModalPaged = document.getElementById('btn-modal-paged');
+const btnModalStream = document.getElementById('btn-modal-stream');
+const modalPagedView = document.getElementById('modal-paged-view');
+const modalStreamView = document.getElementById('modal-stream-view');
+
 // 路径输入自定义弹窗 DOM 节点
 const customPathModal = document.getElementById('custom-path-modal');
 const modalPathInput = document.getElementById('modal-path-input');
@@ -87,6 +93,7 @@ let currentRootFolderPath = '';
 
 let currentMediaList = [];
 let currentMediaIndex = -1;
+let currentModalMode = 'paged'; // 大图模式: 'paged' (翻页) 或 'stream' (流式滑动)
 let lastRenderedText = '';
 
 let saveDebounceTimer = null; 
@@ -489,7 +496,7 @@ function setupTreeDelegation(containerEl) {
 
             if (li && li.dataset.folderPath) {
                 currentFolderPath = li.dataset.folderPath;
-                currentFileKey = ''; // 选中文件夹时取消文件选中状态
+                currentFileKey = '';
                 document.querySelectorAll('.tree-file').forEach(el => el.classList.remove('active'));
                 document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('active'));
                 folderHeader.classList.add('active');
@@ -508,7 +515,7 @@ function setupTreeDelegation(containerEl) {
         const fileLi = e.target.closest('.tree-file');
         if (fileLi && fileLi._fileItem) {
             e.stopPropagation();
-            currentFolderPath = ''; // 选中文件时清除文件夹独占高亮
+            currentFolderPath = '';
             document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('active'));
 
             const item = fileLi._fileItem;
@@ -865,17 +872,16 @@ if (btnCut) {
     btnCut.addEventListener('click', () => {
         syncCurrentContent();
 
-        // 🔑 重复剪切判断：再次点击已剪切的项时，退出/取消剪切
         if (clipboardItem) {
             const currentItem = currentFileKey ? fileDataMap.get(currentFileKey) : null;
             const isSameFile = currentItem && clipboardItem.type === 'file' && clipboardItem.relativePath === currentItem.path;
             const isSameFolder = !currentItem && currentFolderPath && clipboardItem.type === 'folder' && clipboardItem.relativePath === currentFolderPath;
 
             if (isSameFile || isSameFolder) {
-                clipboardItem = null; // 1. 清空剪贴板
+                clipboardItem = null;
                 if (btnPaste) {
-                    btnPaste.setAttribute('disabled', 'true'); // 2. 禁用粘贴按钮
-                    btnPaste.style.background = ''; // 3. 恢复默认灰色样式
+                    btnPaste.setAttribute('disabled', 'true');
+                    btnPaste.style.background = '';
                 }
                 alert('已取消剪切！');
                 return;
@@ -949,7 +955,7 @@ if (btnPaste) {
     });
 }
 
-// ==================== 媒体预览、大图与上下触碰切图 ====================
+// ==================== 媒体预览、大图与上下触碰切图/流式查看 ====================
 function previewMedia(keyLower, fileName, displayPath, isVideo) {
     syncCurrentContent();
     activeMediaPath = displayPath.replace(/\\/g, '/');
@@ -986,13 +992,69 @@ function previewMedia(keyLower, fileName, displayPath, isVideo) {
 function openImageModal() {
     if (!currentMediaList || currentMediaList.length === 0 || currentMediaIndex === -1) return;
     const currentItem = currentMediaList[currentMediaIndex];
-    if (currentItem.isVideo) return;
+    if (currentItem && currentItem.isVideo) return;
 
-    const url = currentItem.srcUrl || mediaUrlsMap.get(currentItem.keyLower);
-    modalImg.src = url;
-    updateModalCounter();
     imageModal.style.display = 'flex';
+    switchModalMode(currentModalMode);
 }
+
+function renderModalStreamView() {
+    modalStreamView.innerHTML = '';
+    if (!currentMediaList) return;
+
+    currentMediaList.forEach((item, idx) => {
+        if (item.isVideo) return;
+        const url = item.srcUrl || mediaUrlsMap.get(item.keyLower) || '';
+        const streamImg = document.createElement('img');
+        streamImg.src = url;
+        streamImg.dataset.index = idx;
+        if (idx === currentMediaIndex) {
+            streamImg.id = 'target-stream-img';
+        }
+        modalStreamView.appendChild(streamImg);
+    });
+
+    updateModalCounter();
+
+    const targetEl = document.getElementById('target-stream-img');
+    if (targetEl) {
+        setTimeout(() => {
+            targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 50);
+    }
+}
+
+function switchModalMode(mode) {
+    currentModalMode = mode;
+    if (mode === 'paged') {
+        btnModalPaged.classList.add('active');
+        btnModalStream.classList.remove('active');
+        modalPagedView.style.display = 'flex';
+        modalStreamView.style.display = 'none';
+        if (currentMediaList && currentMediaIndex >= 0) {
+            const currentItem = currentMediaList[currentMediaIndex];
+            const url = currentItem.srcUrl || mediaUrlsMap.get(currentItem.keyLower) || '';
+            modalImg.src = url;
+        }
+        updateModalCounter();
+    } else {
+        btnModalStream.classList.add('active');
+        btnModalPaged.classList.remove('active');
+        modalPagedView.style.display = 'none';
+        modalStreamView.style.display = 'flex';
+        renderModalStreamView();
+    }
+}
+
+btnModalPaged.addEventListener('click', (e) => {
+    e.stopPropagation();
+    switchModalMode('paged');
+});
+
+btnModalStream.addEventListener('click', (e) => {
+    e.stopPropagation();
+    switchModalMode('stream');
+});
 
 function updateModalCounter() {
     if (currentMediaList.length > 0) {
@@ -1015,9 +1077,11 @@ function switchMedia(direction) {
     }
 
     if (imageModal.style.display === 'flex' && !targetItem.isVideo) {
-        const url = targetItem.srcUrl || mediaUrlsMap.get(targetItem.keyLower) || '';
-        modalImg.src = url;
-        updateModalCounter();
+        if (currentModalMode === 'paged') {
+            const url = targetItem.srcUrl || mediaUrlsMap.get(targetItem.keyLower) || '';
+            modalImg.src = url;
+            updateModalCounter();
+        }
     }
 }
 
@@ -1049,13 +1113,19 @@ imageModal.addEventListener('click', (e) => {
         return;
     }
 
-    const rect = imageModal.getBoundingClientRect();
-    const clickRatio = (e.clientY - rect.top) / rect.height;
+    if (e.target.closest('.modal-mode-switch') || e.target.closest('.modal-close')) {
+        return;
+    }
 
-    if (clickRatio < PREV_TOUCH_RATIO) {
-        switchMedia(-1);
-    } else {
-        switchMedia(1);
+    if (currentModalMode === 'paged') {
+        const rect = imageModal.getBoundingClientRect();
+        const clickRatio = (e.clientY - rect.top) / rect.height;
+
+        if (clickRatio < PREV_TOUCH_RATIO) {
+            switchMedia(-1);
+        } else {
+            switchMedia(1);
+        }
     }
 });
 
@@ -1397,9 +1467,7 @@ preview.addEventListener('click', (e) => {
 
         currentMediaIndex = allPreviewImgs.indexOf(clickedImg);
         if (currentMediaIndex !== -1) {
-            modalImg.src = clickedImg.src;
-            updateModalCounter();
-            imageModal.style.display = 'flex';
+            openImageModal();
         }
     }
 });
