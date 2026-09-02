@@ -971,8 +971,38 @@ btnRenameFolder.addEventListener('click', () => {
     }
 });
 
+// 🔑 优化改动：支持同时彻底删除文本文件或媒体资源文件
 btnDeleteFile.addEventListener('click', () => {
     syncCurrentContent();
+
+    // 1. 优先校验：当前处于媒体预览状态（图片/视频）
+    if (mediaViewer && mediaViewer.style.display !== 'none' && activeMediaPath) {
+        const keyLower = activeMediaPath.toLowerCase();
+        const fullPath = currentRootFolderPath + '/' + activeMediaPath;
+
+        if (!confirm(`确定要彻底删除媒体文件 "${activeMediaPath}" 吗？`)) return;
+
+        // 物理删除磁盘文件
+        if (window.AndroidFS) {
+            window.AndroidFS.deleteFileOrFolder(fullPath);
+        }
+
+        // 清理媒体内存缓存与树节点
+        mediaUrlsMap.delete(keyLower);
+        mediaPathsMap.delete(keyLower);
+        deletePathFromTree(mediaTree, activeMediaPath);
+
+        // 重置预览视图状态
+        activeMediaPath = '';
+        mediaViewer.style.display = 'none';
+        fileTitle.textContent = '未选择文件';
+
+        refreshTrees();
+        alert('媒体文件已删除！');
+        return;
+    }
+
+    // 2. 文本笔记文件删除逻辑
     if (!currentFileKey) {
         alert('请先选择要删除的文件！');
         return;
