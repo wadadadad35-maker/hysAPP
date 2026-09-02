@@ -6,6 +6,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
+import android.util.Base64;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -19,6 +20,10 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -154,7 +159,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 读取绝对路径文本内容
+        // 读取绝对路径文本内容（适用于 .md, .txt, .json 等）
         @JavascriptInterface
         public String readFile(String fullPath) {
             try {
@@ -164,17 +169,63 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 直接写回绝对路径文件
+        // 写回绝对路径文本文件
         @JavascriptInterface
         public boolean writeFile(String fullPath, String content) {
             try {
                 File file = new File(fullPath);
-                if (!file.getParentFile().exists()) {
+                if (file.getParentFile() != null && !file.getParentFile().exists()) {
                     file.getParentFile().mkdirs();
                 }
                 Files.write(Paths.get(fullPath), content.getBytes(StandardCharsets.UTF_8));
                 return true;
             } catch (Exception e) {
+                return false;
+            }
+        }
+
+        // ✨【新增】写回 Base64 格式的二进制文件（用于图片、音频、压缩包等）
+        @JavascriptInterface
+        public boolean writeBase64File(String fullPath, String base64Data) {
+            try {
+                File file = new File(fullPath);
+                if (file.getParentFile() != null && !file.getParentFile().exists()) {
+                    file.getParentFile().mkdirs();
+                }
+                // 去除可能存在的 DataURL 头 (例如 data:image/webp;base64,)
+                if (base64Data != null && base64Data.contains(",")) {
+                    base64Data = base64Data.split(",")[1];
+                }
+                byte[] bytes = Base64.decode(base64Data, Base64.DEFAULT);
+                Files.write(Paths.get(fullPath), bytes);
+                return true;
+            } catch (Exception e) {
+                e.printStackTrace();
+                return false;
+            }
+        }
+
+        // ✨【新增】本地复制文件接口（便于导入外部存储路径的文件）
+        @JavascriptInterface
+        public boolean copyFile(String srcPath, String destPath) {
+            try {
+                File srcFile = new File(srcPath);
+                File destFile = new File(destPath);
+                if (!srcFile.exists()) return false;
+                if (destFile.getParentFile() != null && !destFile.getParentFile().exists()) {
+                    destFile.getParentFile().mkdirs();
+                }
+                try (InputStream in = new FileInputStream(srcFile);
+                     OutputStream out = new FileOutputStream(destFile)) {
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, bytesRead);
+                    }
+                }
+                return true;
+            } catch (Exception e) {
+                e.printStackTrace();
                 return false;
             }
         }
@@ -209,7 +260,7 @@ public class MainActivity extends AppCompatActivity {
             try {
                 File oldFile = new File(oldPath);
                 File newFile = new File(newPath);
-                if (!newFile.getParentFile().exists()) {
+                if (newFile.getParentFile() != null && !newFile.getParentFile().exists()) {
                     newFile.getParentFile().mkdirs();
                 }
                 return oldFile.renameTo(newFile);
