@@ -98,6 +98,7 @@
             <div class="footer-row">
                 <button class="btn btn-create" id="btn-create-file">➕ 新文件</button>
                 <button class="btn btn-create" id="btn-create-folder">➕ 新文件夹</button>
+                <button class="btn btn-zip" id="btn-import-file">📥 导入文件</button>
             </div>
             <div class="footer-row">
                 <button class="btn btn-subtle" id="btn-cut">✂️ 剪切文件/文件夹</button>
@@ -155,6 +156,9 @@
             </div>
         </div>
     </div>
+
+    <!-- 隐藏的本地文件导入选择器 -->
+    <input type="file" id="import-file-input" style="display: none;" multiple>
 
     <script src="script.js?v=11"></script>
 </body>

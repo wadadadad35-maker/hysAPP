@@ -6,6 +6,9 @@ const btnCloseDrawer = document.getElementById('btn-close-drawer');
 
 const btnCreateFile = document.getElementById('btn-create-file');
 const btnCreateFolder = document.getElementById('btn-create-folder');
+const btnImportFile = document.getElementById('btn-import-file');
+const importFileInput = document.getElementById('import-file-input');
+
 const btnCut = document.getElementById('btn-cut');
 const btnPaste = document.getElementById('btn-paste');
 const btnRenameFile = document.getElementById('btn-rename-file');
@@ -97,8 +100,8 @@ let currentRootFolderPath = '';
 
 let currentMediaList = [];
 let currentMediaIndex = -1;
-let currentModalMode = 'paged'; // 大图模式: 'paged' (翻页) 或 'stream' (流式滑动)
-let streamObserver = null;      // 交叉观察器 (用于流式模式下的滚动进度实时监听)
+let currentModalMode = 'paged';
+let streamObserver = null;
 let lastRenderedText = '';
 
 let saveDebounceTimer = null; 
@@ -124,12 +127,11 @@ function saveRecentPath(newPath) {
     if (!newPath) return;
     let paths = getRecentPaths();
     
-    // 过滤重复路径（忽略大小写与末尾斜杠）
     const cleanNew = newPath.toLowerCase().replace(/\/+$/, '');
     paths = paths.filter(p => p.toLowerCase().replace(/\/+$/, '') !== cleanNew);
     
-    paths.unshift(newPath); // 最新的放在第一个
-    paths = paths.slice(0, 3); // 限制最多保留3个
+    paths.unshift(newPath);
+    paths = paths.slice(0, 3);
     
     try {
         localStorage.setItem('recent_folder_paths', JSON.stringify(paths));
@@ -607,7 +609,7 @@ function showPathModal() {
         modalPathInput.value = currentRootFolderPath || "/sdcard/Documents/";
     }
     if (recentPathsList) {
-        recentPathsList.style.display = 'none'; // 切换显示前重置隐藏最近列表
+        recentPathsList.style.display = 'none';
     }
     if (customPathModal) {
         customPathModal.classList.add('active');
@@ -632,7 +634,7 @@ function executeFolderScan(inputPath, isSilent = false) {
 
     try {
         localStorage.setItem('last_folder_path', folderPath);
-        saveRecentPath(folderPath); // 保存至最近打开记录
+        saveRecentPath(folderPath);
     } catch (e) {
         console.error('无法保存路径到缓存:', e);
     }
@@ -730,7 +732,6 @@ function loadMdContent(keyLower) {
     currentFileKey = keyLower;
     fileTitle.textContent = item.path;
 
-    // 持久化保存当前打开的具体文件路径 Key
     try {
         localStorage.setItem('last_file_key', keyLower);
     } catch (e) {
@@ -833,6 +834,69 @@ btnCreateFolder.addEventListener('click', () => {
     insertFolderToTree(mdTree, folderPath);
     refreshTrees();
 });
+
+// ==================== 导入外部文件/图片/笔记 ====================
+if (btnImportFile && importFileInput) {
+    btnImportFile.addEventListener('click', () => {
+        if (!currentRootFolderPath) {
+            alert("请先打开本地文件夹！");
+            return;
+        }
+        importFileInput.click();
+    });
+
+    importFileInput.addEventListener('change', async (e) => {
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+
+        const targetFolder = currentFolderPath ? currentFolderPath : '';
+        let successCount = 0;
+
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const targetRelativePath = targetFolder ? `${targetFolder}/${file.name}` : file.name;
+            const fullPath = currentRootFolderPath + '/' + targetRelativePath;
+
+            try {
+                await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    const isText = /\.(md|txt|json|js|html|css|xml|yaml|yml|csv)$/i.test(file.name);
+
+                    if (isText) {
+                        reader.readAsText(file);
+                        reader.onload = () => {
+                            if (window.AndroidFS) {
+                                window.AndroidFS.writeFile(fullPath, reader.result);
+                            }
+                            resolve();
+                        };
+                    } else {
+                        reader.readAsDataURL(file);
+                        reader.onload = () => {
+                            if (window.AndroidFS) {
+                                if (typeof window.AndroidFS.writeBase64File === 'function') {
+                                    const base64Data = reader.result.split(',')[1];
+                                    window.AndroidFS.writeBase64File(fullPath, base64Data);
+                                } else {
+                                    window.AndroidFS.writeFile(fullPath, reader.result);
+                                }
+                            }
+                            resolve();
+                        };
+                    }
+                    reader.onerror = reject;
+                });
+                successCount++;
+            } catch (err) {
+                console.error('导入文件失败:', file.name, err);
+            }
+        }
+
+        alert(`成功导入 ${successCount} 个文件！`);
+        importFileInput.value = ''; 
+        rescanDirectorySilently(); 
+    });
+}
 
 btnRenameFile.addEventListener('click', () => {
     syncCurrentContent();
@@ -1055,7 +1119,6 @@ function previewMedia(keyLower, fileName, displayPath, isVideo) {
     const progressText = totalCount > 0 ? ` (${currentMediaIndex + 1}/${totalCount})` : '';
     fileTitle.textContent = `${isVideo ? '🎬' : '🖼️'} ${displayPath}${progressText}`;
 
-    // 持久化保存当前打开的媒体文件 Key
     try {
         localStorage.setItem('last_file_key', keyLower);
     } catch (e) {
@@ -1094,7 +1157,6 @@ function openImageModal() {
     switchModalMode(currentModalMode);
 }
 
-// 交叉观察器：实时监听滑动位置并同步 currentMediaIndex
 function initStreamObserver() {
     if (streamObserver) {
         streamObserver.disconnect();
@@ -1105,14 +1167,14 @@ function initStreamObserver() {
             if (entry.isIntersecting) {
                 const idx = parseInt(entry.target.dataset.index, 10);
                 if (!isNaN(idx) && idx !== currentMediaIndex) {
-                    currentMediaIndex = idx; // 实时写回全局阅读状态
-                    updateModalCounter();    // 实时更新顶部页码显示 (X / N)
+                    currentMediaIndex = idx;
+                    updateModalCounter();
                 }
             }
         });
     }, {
         root: modalStreamView,
-        rootMargin: '-40% 0px -40% 0px', // 仅将屏幕垂直方向中间 20% 的区域作为判定触发口
+        rootMargin: '-40% 0px -40% 0px',
         threshold: 0
     });
 
@@ -1142,7 +1204,7 @@ function renderModalStreamView() {
     if (targetEl) {
         setTimeout(() => {
             targetEl.scrollIntoView({ behavior: 'auto', block: 'center' });
-            initStreamObserver(); // 页面定位滚动完成后再开启位置监听
+            initStreamObserver();
         }, 50);
     } else {
         initStreamObserver();
@@ -1636,10 +1698,8 @@ btnModePreview.addEventListener('click', () => {
 window.addEventListener('DOMContentLoaded', () => {
     const savedPath = localStorage.getItem('last_folder_path');
     if (savedPath) {
-        // 静默加载并扫描保存的根目录
         executeFolderScan(savedPath, true);
 
-        // 尝试恢复上次打开的具体文件（Markdown 或 媒体文件）
         const savedFileKey = localStorage.getItem('last_file_key');
         if (savedFileKey) {
             if (fileDataMap.has(savedFileKey)) {
