@@ -730,6 +730,13 @@ function loadMdContent(keyLower) {
     currentFileKey = keyLower;
     fileTitle.textContent = item.path;
 
+    // 持久化保存当前打开的具体文件路径 Key
+    try {
+        localStorage.setItem('last_file_key', keyLower);
+    } catch (e) {
+        console.error('保存打开文件记录失败:', e);
+    }
+
     if (window.AndroidFS && item.fullPath) {
         item.text = window.AndroidFS.readFile(item.fullPath);
     }
@@ -861,6 +868,10 @@ btnRenameFile.addEventListener('click', () => {
         insertPathToTree(mdTree, newRelativePath, { keyLower: newLowerKey, path: newRelativePath, fullPath: newFullPath, isMedia: false });
 
         currentFileKey = newLowerKey;
+        try {
+            localStorage.setItem('last_file_key', newLowerKey);
+        } catch (e) {}
+
         refreshTrees();
         fileTitle.textContent = newRelativePath;
         alert('重命名成功！');
@@ -912,6 +923,10 @@ btnDeleteFile.addEventListener('click', () => {
 
     fileDataMap.delete(currentFileKey);
     deletePathFromTree(mdTree, item.path);
+
+    try {
+        localStorage.removeItem('last_file_key');
+    } catch (e) {}
 
     currentFileKey = '';
     editor.value = '';
@@ -1039,6 +1054,13 @@ function previewMedia(keyLower, fileName, displayPath, isVideo) {
     const totalCount = currentMediaList.length;
     const progressText = totalCount > 0 ? ` (${currentMediaIndex + 1}/${totalCount})` : '';
     fileTitle.textContent = `${isVideo ? '🎬' : '🖼️'} ${displayPath}${progressText}`;
+
+    // 持久化保存当前打开的媒体文件 Key
+    try {
+        localStorage.setItem('last_file_key', keyLower);
+    } catch (e) {
+        console.error('保存打开媒体文件记录失败:', e);
+    }
 
     editor.style.display = 'none';
     preview.style.display = 'none';
@@ -1610,9 +1632,26 @@ btnModePreview.addEventListener('click', () => {
     renderMarkdown();
 });
 
+// ==================== 页面初始化与状态自动恢复 ====================
 window.addEventListener('DOMContentLoaded', () => {
     const savedPath = localStorage.getItem('last_folder_path');
     if (savedPath) {
+        // 静默加载并扫描保存的根目录
         executeFolderScan(savedPath, true);
+
+        // 尝试恢复上次打开的具体文件（Markdown 或 媒体文件）
+        const savedFileKey = localStorage.getItem('last_file_key');
+        if (savedFileKey) {
+            if (fileDataMap.has(savedFileKey)) {
+                loadMdContent(savedFileKey);
+            } else if (mediaUrlsMap.has(savedFileKey)) {
+                const displayPath = mediaPathsMap.get(savedFileKey);
+                if (displayPath) {
+                    const fileName = displayPath.split('/').pop();
+                    const isVideo = VIDEO_REGEX.test(fileName);
+                    previewMedia(savedFileKey, fileName, displayPath, isVideo);
+                }
+            }
+        }
     }
 });
