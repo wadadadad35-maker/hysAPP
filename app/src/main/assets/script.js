@@ -789,14 +789,28 @@ btnCreateFile.addEventListener('click', () => {
         return;
     }
     syncCurrentContent();
-    const inputPath = prompt('请输入新文件相对路径（例如: 随笔.md 或 分类/测试.md）：');
-    if (!inputPath || !inputPath.trim()) return;
 
-    let relativePath = inputPath.trim().replace(/\\/g, '/');
-    if (!/\.[a-zA-Z0-9]+$/.test(relativePath)) relativePath += '.md';
+    // 自动判定目标文件夹：优先取选中的文件夹，若当前选中了文件则取其父目录，否则为根目录
+    let targetFolder = '';
+    if (currentFolderPath) {
+        targetFolder = currentFolderPath;
+    } else if (currentFileKey && currentFileKey.includes('/')) {
+        targetFolder = currentFileKey.substring(0, currentFileKey.lastIndexOf('/'));
+    }
 
+    const promptMsg = targetFolder 
+        ? `在 [ ${targetFolder} ] 中新建文件，请输入文件名：` 
+        : '在根目录下新建文件，请输入文件名：';
+
+    const inputName = prompt(promptMsg);
+    if (!inputName || !inputName.trim()) return;
+
+    let cleanName = inputName.trim().replace(/\\/g, '/');
+    if (!/\.[a-zA-Z0-9]+$/.test(cleanName)) cleanName += '.md';
+
+    const relativePath = targetFolder ? `${targetFolder}/${cleanName}` : cleanName;
     const lowerPath = relativePath.toLowerCase();
-    const fileName = relativePath.split('/').pop();
+    const fileName = cleanName.split('/').pop();
     const fullPath = currentRootFolderPath + '/' + relativePath;
 
     if (fileDataMap.has(lowerPath)) {
@@ -821,10 +835,24 @@ btnCreateFolder.addEventListener('click', () => {
         alert("请先打开本地文件夹！");
         return;
     }
-    const inputPath = prompt('请输入新文件夹名称或路径（例如: 目录A/子目录）：');
-    if (!inputPath || !inputPath.trim()) return;
 
-    const folderPath = inputPath.trim().replace(/\\/g, '/');
+    // 自动判定目标文件夹
+    let targetFolder = '';
+    if (currentFolderPath) {
+        targetFolder = currentFolderPath;
+    } else if (currentFileKey && currentFileKey.includes('/')) {
+        targetFolder = currentFileKey.substring(0, currentFileKey.lastIndexOf('/'));
+    }
+
+    const promptMsg = targetFolder 
+        ? `在 [ ${targetFolder} ] 中新建子文件夹，请输入文件夹名：` 
+        : '在根目录下新建文件夹，请输入文件夹名：';
+
+    const inputName = prompt(promptMsg);
+    if (!inputName || !inputName.trim()) return;
+
+    const folderName = inputName.trim().replace(/\\/g, '/');
+    const folderPath = targetFolder ? `${targetFolder}/${folderName}` : folderName;
     const fullPath = currentRootFolderPath + '/' + folderPath;
 
     if (window.AndroidFS) {
@@ -1279,7 +1307,6 @@ function updateModalCounter() {
     }
 }
 
-// ✨【已修改】补全流式模式下按音量键滚动与计数更新逻辑
 function switchMedia(direction) {
     if (!currentMediaList || currentMediaList.length === 0) return;
 
