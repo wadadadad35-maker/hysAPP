@@ -7,6 +7,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
 import android.util.Base64;
+import android.view.KeyEvent; // 🔑 新增按键事件 import
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -101,6 +102,22 @@ public class MainActivity extends AppCompatActivity {
             // 将当前 Task 移到后台，保持 Activity 存活
             moveTaskToBack(true);
         }
+    }
+
+    // 🔑【新增】重写物理按键监听：拦截物理音量键并派发给 WebView 内的 JavaScript 触发翻页
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            String keyName = (keyCode == KeyEvent.KEYCODE_VOLUME_UP) ? "AudioVolumeUp" : "AudioVolumeDown";
+            if (webView != null) {
+                webView.evaluateJavascript(
+                    "window.dispatchEvent(new KeyboardEvent('keydown', {key: '" + keyName + "', keyCode: " + keyCode + "}));", 
+                    null
+                );
+            }
+            return true; // 返回 true 拦截系统默认调节音量的行为
+        }
+        return super.onKeyDown(keyCode, event);
     }
 
     private void requestStoragePermission() {
