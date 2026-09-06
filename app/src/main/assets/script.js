@@ -1279,6 +1279,7 @@ function updateModalCounter() {
     }
 }
 
+// ✨【已修改】补全流式模式下按音量键滚动与计数更新逻辑
 function switchMedia(direction) {
     if (!currentMediaList || currentMediaList.length === 0) return;
 
@@ -1297,6 +1298,12 @@ function switchMedia(direction) {
         if (currentModalMode === 'paged') {
             const url = targetItem.srcUrl || mediaUrlsMap.get(targetItem.keyLower) || '';
             modalImg.src = url;
+            updateModalCounter();
+        } else if (currentModalMode === 'stream') {
+            const targetImg = modalStreamView.querySelector(`img[data-index="${currentMediaIndex}"]`);
+            if (targetImg) {
+                targetImg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
             updateModalCounter();
         }
     }
