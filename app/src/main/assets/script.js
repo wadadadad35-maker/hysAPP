@@ -971,28 +971,23 @@ btnRenameFolder.addEventListener('click', () => {
     }
 });
 
-// 🔑 优化改动：支持同时彻底删除文本文件或媒体资源文件
 btnDeleteFile.addEventListener('click', () => {
     syncCurrentContent();
 
-    // 1. 优先校验：当前处于媒体预览状态（图片/视频）
     if (mediaViewer && mediaViewer.style.display !== 'none' && activeMediaPath) {
         const keyLower = activeMediaPath.toLowerCase();
         const fullPath = currentRootFolderPath + '/' + activeMediaPath;
 
         if (!confirm(`确定要彻底删除媒体文件 "${activeMediaPath}" 吗？`)) return;
 
-        // 物理删除磁盘文件
         if (window.AndroidFS) {
             window.AndroidFS.deleteFileOrFolder(fullPath);
         }
 
-        // 清理媒体内存缓存与树节点
         mediaUrlsMap.delete(keyLower);
         mediaPathsMap.delete(keyLower);
         deletePathFromTree(mediaTree, activeMediaPath);
 
-        // 重置预览视图状态
         activeMediaPath = '';
         mediaViewer.style.display = 'none';
         fileTitle.textContent = '未选择文件';
@@ -1002,7 +997,6 @@ btnDeleteFile.addEventListener('click', () => {
         return;
     }
 
-    // 2. 文本笔记文件删除逻辑
     if (!currentFileKey) {
         alert('请先选择要删除的文件！');
         return;
@@ -1362,6 +1356,38 @@ modalClose.addEventListener('click', () => {
         streamObserver = null;
     }
     imageModal.style.display = 'none';
+});
+
+// ==================== 音量键与方向键翻页监听 ====================
+window.addEventListener('keydown', (e) => {
+    const isModalOpen = imageModal && imageModal.style.display === 'flex';
+    const isMediaOpen = mediaViewer && mediaViewer.style.display !== 'none';
+
+    if (!isModalOpen && !isMediaOpen) return;
+
+    const isUpKey = e.key === 'AudioVolumeUp' || 
+                   e.key === 'VolumeUp' || 
+                   e.code === 'AudioVolumeUp' || 
+                   e.keyCode === 24 || 
+                   e.key === 'ArrowUp' || 
+                   e.key === 'ArrowLeft' || 
+                   e.key === 'PageUp';
+
+    const isDownKey = e.key === 'AudioVolumeDown' || 
+                     e.key === 'VolumeDown' || 
+                     e.code === 'AudioVolumeDown' || 
+                     e.keyCode === 25 || 
+                     e.key === 'ArrowDown' || 
+                     e.key === 'ArrowRight' || 
+                     e.key === 'PageDown';
+
+    if (isUpKey) {
+        e.preventDefault();
+        switchMedia(-1);
+    } else if (isDownKey) {
+        e.preventDefault();
+        switchMedia(1);
+    }
 });
 
 // ==================== 复制语法与顶/底滚动 ====================
