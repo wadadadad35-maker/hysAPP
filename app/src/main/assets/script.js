@@ -290,7 +290,7 @@ function resetTreeCollapse() {
     });
 }
 
-function expandAndHighlightPath(keyLower, containerEl) {
+function expandAndHighlightPath(keyLower, containerEl, shouldHighlight = true) {
     if (!keyLower || !containerEl) return;
     const normalizedKey = keyLower.replace(/\\/g, '/').toLowerCase();
     const parts = normalizedKey.split('/').filter(Boolean);
@@ -311,6 +311,7 @@ function expandAndHighlightPath(keyLower, containerEl) {
         }
 
         if (matchedFolderLi) {
+            matchedFolderLi.style.display = 'block';
             const childrenUl = matchedFolderLi._ensureRendered 
                 ? matchedFolderLi._ensureRendered() 
                 : matchedFolderLi.querySelector(':scope > ul');
@@ -339,19 +340,22 @@ function expandAndHighlightPath(keyLower, containerEl) {
     }
 
     if (targetLi) {
-        document.querySelectorAll('.tree-file').forEach(el => el.classList.remove('active'));
-        targetLi.classList.add('active');
-        setTimeout(() => {
-            targetLi.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        }, 100);
+        targetLi.style.display = 'flex';
+        if (shouldHighlight) {
+            document.querySelectorAll('.tree-file').forEach(el => el.classList.remove('active'));
+            targetLi.classList.add('active');
+            setTimeout(() => {
+                targetLi.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }, 100);
+        }
     }
 }
 
 function autoExpandCurrentFile() {
     if (mediaViewer.style.display !== 'none' && activeMediaPath) {
-        expandAndHighlightPath(activeMediaPath, mediaList);
+        expandAndHighlightPath(activeMediaPath, mediaList, true);
     } else if (currentFileKey) {
-        expandAndHighlightPath(currentFileKey, mdList);
+        expandAndHighlightPath(currentFileKey, mdList, true);
     }
 }
 
@@ -790,7 +794,6 @@ btnCreateFile.addEventListener('click', () => {
     }
     syncCurrentContent();
 
-    // 自动判定目标文件夹：优先取选中的文件夹，若当前选中了文件则取其父目录，否则为根目录
     let targetFolder = '';
     if (currentFolderPath) {
         targetFolder = currentFolderPath;
@@ -836,7 +839,6 @@ btnCreateFolder.addEventListener('click', () => {
         return;
     }
 
-    // 自动判定目标文件夹
     let targetFolder = '';
     if (currentFolderPath) {
         targetFolder = currentFolderPath;
@@ -1455,36 +1457,32 @@ btnScrollBottom.addEventListener('click', () => {
     else preview.scrollTop = preview.scrollHeight;
 });
 
-// ==================== 抽屉内目录搜索逻辑 ====================
+// ==================== 抽屉内目录搜索逻辑（已修改为兼容懒加载） ====================
 function performSearch() {
     const query = searchInput.value.toLowerCase().trim();
-    const allElements = document.querySelectorAll('#bottom-sheet .tree-folder, #bottom-sheet .tree-file');
 
     if (!query) {
-        allElements.forEach(el => el.style.display = '');
+        document.querySelectorAll('#bottom-sheet .tree-folder, #bottom-sheet .tree-file').forEach(el => el.style.display = '');
         resetTreeCollapse();
         return;
     }
 
-    allElements.forEach(el => el.style.display = 'none');
+    // 1. 先隐藏当前 DOM 树中所有的文件夹与文件
+    document.querySelectorAll('#bottom-sheet .tree-folder').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('#bottom-sheet .tree-file').forEach(el => el.style.display = 'none');
 
-    const fileElements = document.querySelectorAll('#bottom-sheet .tree-file');
-    fileElements.forEach(fileLi => {
-        const fileName = fileLi.dataset.fileName || '';
-        if (fileName.includes(query)) {
-            fileLi.style.display = 'flex';
-            let parent = fileLi.parentElement;
-            while (parent) {
-                if (parent.classList.contains('tree-folder')) {
-                    parent.style.display = 'block';
-                    if (parent._ensureRendered) {
-                        const parentUl = parent._ensureRendered();
-                        if (parentUl) parentUl.style.display = 'block';
-                    }
-                }
-                if (parent.classList.contains('tree-node')) parent.style.display = 'block';
-                parent = parent.parentElement;
-            }
+    // 2. 检索 Markdown 笔记 Map 数据，匹配文件名或相对路径，自动展开并创建 DOM 节点
+    fileDataMap.forEach((item, keyLower) => {
+        if (item.name.toLowerCase().includes(query) || item.path.toLowerCase().includes(query)) {
+            expandAndHighlightPath(keyLower, mdList, false);
+        }
+    });
+
+    // 3. 检索媒体 Map 数据，匹配文件名或相对路径，自动展开并创建 DOM 节点
+    mediaPathsMap.forEach((relativePath, keyLower) => {
+        const fileName = relativePath.split('/').pop().toLowerCase();
+        if (fileName.includes(query) || relativePath.toLowerCase().includes(query)) {
+            expandAndHighlightPath(keyLower, mediaList, false);
         }
     });
 }
