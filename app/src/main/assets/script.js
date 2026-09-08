@@ -113,6 +113,77 @@ let clipboardItem = null;
 let noteSearchMatches = [];
 let currentNoteSearchIndex = -1;
 
+// ==================== 文件夹独立状态（每个文件夹分别记忆上次进度） ====================
+const FOLDER_VIEW_STATE_KEY = 'folder_view_states_v1';
+const MAX_FOLDER_VIEW_STATES = 30;
+
+function normalizeRootFolderPath(path) {
+    return (path || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+function getFolderViewStates() {
+    try {
+        const json = localStorage.getItem(FOLDER_VIEW_STATE_KEY);
+        const data = json ? JSON.parse(json) : {};
+        return (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function saveFolderViewState() {
+    if (!currentRootFolderPath) return;
+
+    syncCurrentContent();
+
+    const rootKey = normalizeRootFolderPath(currentRootFolderPath);
+    if (!rootKey) return;
+
+    try {
+        const states = getFolderViewStates();
+
+        states[rootKey] = {
+            fileKey: currentFileKey || '',
+            mediaPath: activeMediaPath || '',
+            mode: currentMode || 'edit',
+            editorScrollTop: editor ? editor.scrollTop : 0,
+            previewScrollTop: preview ? preview.scrollTop : 0,
+            currentFolderPath: currentFolderPath || '',
+            videoCurrentTime: videoDisplay ? videoDisplay.currentTime : 0,
+            updatedAt: Date.now()
+        };
+
+        const entries = Object.entries(states)
+            .sort((a, b) => (b[1]?.updatedAt || 0) - (a[1]?.updatedAt || 0))
+            .slice(0, MAX_FOLDER_VIEW_STATES);
+
+        localStorage.setItem(FOLDER_VIEW_STATE_KEY, JSON.stringify(Object.fromEntries(entries)));
+    } catch (e) {
+        console.error('保存文件夹阅读进度失败:', e);
+    }
+}
+
+function getFolderViewState(rootPath) {
+    const rootKey = normalizeRootFolderPath(rootPath);
+    if (!rootKey) return null;
+
+    const states = getFolderViewStates();
+    return states[rootKey] || null;
+}
+
+function clearFolderViewState(rootPath) {
+    const rootKey = normalizeRootFolderPath(rootPath);
+    if (!rootKey) return;
+
+    try {
+        const states = getFolderViewStates();
+        delete states[rootKey];
+        localStorage.setItem(FOLDER_VIEW_STATE_KEY, JSON.stringify(states));
+    } catch (e) {
+        console.error('清除文件夹阅读进度失败:', e);
+    }
+}
+
 // ==================== 最近路径读写逻辑 ====================
 function getRecentPaths() {
     try {
@@ -633,8 +704,26 @@ function executeFolderScan(inputPath, isSilent = false) {
     if (!inputPath || !inputPath.trim()) return;
 
     const folderPath = inputPath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    const previousRootFolderPath = currentRootFolderPath;
+    const isSwitchingFolder = !!previousRootFolderPath &&
+        normalizeRootFolderPath(previousRootFolderPath) !== normalizeRootFolderPath(folderPath);
+
+    // 切换目录前保存当前目录的状态
+    if (isSwitchingFolder) {
+        saveFolderViewState();
+    } else {
+        syncCurrentContent();
+    }
+
+    if (typeof window.AndroidFS === 'undefined') {
+        if (!isSilent) alert("未检测到 Android 原生桥接环境，请在 Android App 内运行！");
+        return;
+    }
+
     currentRootFolderPath = folderPath;
     currentFolderPath = '';
+    currentFileKey = '';
+    activeMediaPath = '';
 
     try {
         localStorage.setItem('last_folder_path', folderPath);
@@ -643,18 +732,14 @@ function executeFolderScan(inputPath, isSilent = false) {
         console.error('无法保存路径到缓存:', e);
     }
 
-    if (typeof window.AndroidFS === 'undefined') {
-        if (!isSilent) alert("未检测到 Android 原生桥接环境，请在 Android App 内运行！");
-        return;
-    }
-
-    syncCurrentContent();
     rescanDirectorySilently();
-
     refreshTrees();
     fileTitle.textContent = folderPath;
-    closeDrawer(); 
-    
+    closeDrawer();
+
+    // 回到这个目录时恢复上次打开的文件/媒体及阅读位置
+    restoreFolderViewState(folderPath);
+
     if (!isSilent) {
         alert(`成功加载目录！`);
     }
@@ -716,8 +801,68 @@ btnRefresh.addEventListener('click', () => {
 });
 
 // ==================== 文件物理读写 ====================
+function restoreFolderViewState(rootPath) {
+    const state = getFolderViewState(rootPath);
+    if (!state || !state.fileKey) return;
+
+    if (fileDataMap.has(state.fileKey)) {
+        loadMdContent(state.fileKey);
+
+        if (state.mode === 'preview') {
+            currentMode = 'preview';
+            btnModePreview.classList.add('active');
+            btnModeEdit.classList.remove('active');
+            mediaViewer.style.display = 'none';
+            editor.style.display = 'none';
+            preview.style.display = 'block';
+            renderMarkdown();
+        }
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                if (state.mode === 'preview') {
+                    preview.scrollTop = Math.max(0, Number(state.previewScrollTop) || 0);
+                } else {
+                    editor.scrollTop = Math.max(0, Number(state.editorScrollTop) || 0);
+                }
+                saveFolderViewState();
+            });
+        });
+
+    } else if (mediaUrlsMap.has(state.fileKey)) {
+        const displayPath = mediaPathsMap.get(state.fileKey);
+
+        if (displayPath) {
+            const fileName = displayPath.split('/').pop();
+            const isVideo = VIDEO_REGEX.test(fileName);
+
+            previewMedia(state.fileKey, fileName, displayPath, isVideo);
+
+            if (isVideo && Number(state.videoCurrentTime) > 0) {
+                const restoreVideoTime = () => {
+                    try {
+                        videoDisplay.currentTime = Number(state.videoCurrentTime) || 0;
+                    } catch (e) {}
+                };
+
+                if (videoDisplay.readyState >= 1) {
+                    restoreVideoTime();
+                } else {
+                    videoDisplay.addEventListener('loadedmetadata', restoreVideoTime, { once: true });
+                }
+            }
+        }
+    }
+}
+
 function loadMdContent(keyLower) {
     syncCurrentContent();
+
+    if (currentRootFolderPath && currentFileKey && currentFileKey !== keyLower) {
+        // 切换文件前先保存旧文件的滚动位置
+        saveFolderViewState();
+    }
+
     lastRenderedText = ''; 
     
     document.querySelectorAll('.tree-file').forEach(el => {
@@ -760,6 +905,10 @@ function loadMdContent(keyLower) {
     }
 
     resetNoteSearch();
+
+    if (currentRootFolderPath) {
+        saveFolderViewState();
+    }
 }
 
 function saveCurrentFile() {
@@ -1165,7 +1314,13 @@ if (btnPaste) {
 // ==================== 媒体预览、大图与上下触碰切图/流式查看 ====================
 function previewMedia(keyLower, fileName, displayPath, isVideo) {
     syncCurrentContent();
+
+    if (currentRootFolderPath && currentFileKey && currentFileKey !== keyLower) {
+        saveFolderViewState();
+    }
+
     activeMediaPath = displayPath.replace(/\\/g, '/');
+    currentFileKey = keyLower;
     currentMediaList = getSameFolderMediaList(keyLower);
     currentMediaIndex = currentMediaList.findIndex(item => item.keyLower === keyLower);
 
@@ -1199,6 +1354,10 @@ function previewMedia(keyLower, fileName, displayPath, isVideo) {
         imgDisplay.style.display = 'block';
         btnZoomImg.style.display = 'inline-flex';
         imgDisplay.src = url;
+    }
+
+    if (currentRootFolderPath) {
+        saveFolderViewState();
     }
 }
 
@@ -1769,6 +1928,10 @@ btnModeEdit.addEventListener('click', () => {
     mediaViewer.style.display = 'none';
     editor.style.display = 'block';
     preview.style.display = 'none';
+
+    if (currentRootFolderPath) {
+        saveFolderViewState();
+    }
 });
 
 btnModePreview.addEventListener('click', () => {
@@ -1780,24 +1943,59 @@ btnModePreview.addEventListener('click', () => {
     editor.style.display = 'none';
     preview.style.display = 'block';
     renderMarkdown();
+
+    requestAnimationFrame(() => {
+        if (currentRootFolderPath) {
+            saveFolderViewState();
+        }
+    });
 });
+
+// 编辑器/预览滚动时低频保存阅读进度
+let viewStateSaveTimer = null;
+
+function scheduleSaveFolderViewState() {
+    if (viewStateSaveTimer) return;
+
+    viewStateSaveTimer = setTimeout(() => {
+        viewStateSaveTimer = null;
+        saveFolderViewState();
+    }, 250);
+}
+
+if (editor) editor.addEventListener('scroll', scheduleSaveFolderViewState, { passive: true });
+if (preview) preview.addEventListener('scroll', scheduleSaveFolderViewState, { passive: true });
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+        saveFolderViewState();
+    }
+});
+
+window.addEventListener('pagehide', saveFolderViewState);
 
 // ==================== 页面初始化与状态自动恢复 ====================
 window.addEventListener('DOMContentLoaded', () => {
     const savedPath = localStorage.getItem('last_folder_path');
+
     if (savedPath) {
         executeFolderScan(savedPath, true);
 
-        const savedFileKey = localStorage.getItem('last_file_key');
-        if (savedFileKey) {
-            if (fileDataMap.has(savedFileKey)) {
-                loadMdContent(savedFileKey);
-            } else if (mediaUrlsMap.has(savedFileKey)) {
-                const displayPath = mediaPathsMap.get(savedFileKey);
-                if (displayPath) {
-                    const fileName = displayPath.split('/').pop();
-                    const isVideo = VIDEO_REGEX.test(fileName);
-                    previewMedia(savedFileKey, fileName, displayPath, isVideo);
+        // 兼容旧版本：若当前目录还没有独立状态，则迁移旧的 last_file_key
+        if (!getFolderViewState(savedPath)) {
+            const savedFileKey = localStorage.getItem('last_file_key');
+
+            if (savedFileKey) {
+                if (fileDataMap.has(savedFileKey)) {
+                    loadMdContent(savedFileKey);
+                } else if (mediaUrlsMap.has(savedFileKey)) {
+                    const displayPath = mediaPathsMap.get(savedFileKey);
+
+                    if (displayPath) {
+                        const fileName = displayPath.split('/').pop();
+                        const isVideo = VIDEO_REGEX.test(fileName);
+                        previewMedia(savedFileKey, fileName, displayPath, isVideo);
+                    }
                 }
             }
         }
