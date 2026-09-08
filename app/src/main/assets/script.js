@@ -115,7 +115,7 @@ let currentNoteSearchIndex = -1;
 
 // ==================== 文件夹独立状态（每个文件夹分别记忆上次进度） ====================
 const FOLDER_VIEW_STATE_KEY = 'folder_view_states_v1';
-const MAX_FOLDER_VIEW_STATES = 30;
+const MAX_FOLDER_VIEW_STATES = 10;
 
 function normalizeRootFolderPath(path) {
     return (path || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
