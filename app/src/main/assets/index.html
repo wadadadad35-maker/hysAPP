@@ -9,7 +9,7 @@
     <script src="marked.min.js"></script>
     
     <!-- 引入外部 CSS 样式 -->
-    <link rel="stylesheet" href="style.css?v=9">
+    <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 
@@ -112,6 +112,9 @@
                 <button class="btn btn-danger" id="btn-delete-file">🗑️ 删除文件</button>
                 <button class="btn btn-danger" id="btn-delete-folder">🗑️ 删除文件夹</button>
             </div>
+            <div class="footer-row">
+                <button class="btn btn-subtle" id="btn-last-progress" title="跳转到当前选中文件夹上次保存的进度">📍 上次进度</button>
+            </div>
         </div>
     </div>
 
@@ -160,6 +163,6 @@
     <!-- 隐藏的本地文件导入选择器 -->
     <input type="file" id="import-file-input" style="display: none;" multiple>
 
-    <script src="script.js?v=11"></script>
+    <script src="script.js?v=12"></script>
 </body>
 </html>

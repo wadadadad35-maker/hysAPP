@@ -16,6 +16,7 @@ const btnRenameFolder = document.getElementById('btn-rename-folder');
 const btnDeleteFile = document.getElementById('btn-delete-file');
 const btnDeleteFolder = document.getElementById('btn-delete-folder');
 const btnTriggerFolder = document.getElementById('btn-trigger-folder');
+const btnLastProgress = document.getElementById('btn-last-progress');
 
 const mdList = document.getElementById('md-list');
 const mediaList = document.getElementById('media-list');
@@ -113,12 +114,37 @@ let clipboardItem = null;
 let noteSearchMatches = [];
 let currentNoteSearchIndex = -1;
 
-// ==================== 文件夹独立状态（每个文件夹分别记忆上次进度） ====================
-const FOLDER_VIEW_STATE_KEY = 'folder_view_states_v1';
-const MAX_FOLDER_VIEW_STATES = 10;
+// ==================== 文件夹独立状态（每个子文件夹分别记忆上次进度） ====================
+const FOLDER_VIEW_STATE_KEY = 'folder_view_states_v2';
+const MAX_FOLDER_VIEW_STATES = 40;
 
 function normalizeRootFolderPath(path) {
     return (path || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+function normalizeFolderKey(path) {
+    return (path || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').toLowerCase();
+}
+
+/** 获取当前查看内容所在的相对文件夹路径（用于按文件夹存进度） */
+function getCurrentViewFolderPath() {
+    if (activeMediaPath) {
+        const parts = activeMediaPath.replace(/\\/g, '/').split('/').filter(Boolean);
+        parts.pop();
+        return parts.join('/');
+    }
+    if (currentFileKey) {
+        const parts = currentFileKey.replace(/\\/g, '/').split('/').filter(Boolean);
+        parts.pop();
+        return parts.join('/');
+    }
+    return currentFolderPath || '';
+}
+
+function makeStateCompositeKey(rootPath, folderPath) {
+    const rootKey = normalizeRootFolderPath(rootPath);
+    const folderKey = normalizeFolderKey(folderPath);
+    return rootKey + '::' + folderKey;
 }
 
 function getFolderViewStates() {
@@ -139,16 +165,31 @@ function saveFolderViewState() {
     const rootKey = normalizeRootFolderPath(currentRootFolderPath);
     if (!rootKey) return;
 
+    const folderPath = getCurrentViewFolderPath();
+    const compositeKey = makeStateCompositeKey(currentRootFolderPath, folderPath);
+
     try {
         const states = getFolderViewStates();
 
-        states[rootKey] = {
+        states[compositeKey] = {
             fileKey: currentFileKey || '',
             mediaPath: activeMediaPath || '',
             mode: currentMode || 'edit',
             editorScrollTop: editor ? editor.scrollTop : 0,
             previewScrollTop: preview ? preview.scrollTop : 0,
-            currentFolderPath: currentFolderPath || '',
+            currentFolderPath: currentFolderPath || folderPath || '',
+            videoCurrentTime: videoDisplay ? videoDisplay.currentTime : 0,
+            updatedAt: Date.now()
+        };
+
+        // 同时更新该根目录的「最近一次」快捷入口（兼容打开根目录时自动恢复）
+        states[rootKey + '::__last__'] = {
+            fileKey: currentFileKey || '',
+            mediaPath: activeMediaPath || '',
+            mode: currentMode || 'edit',
+            editorScrollTop: editor ? editor.scrollTop : 0,
+            previewScrollTop: preview ? preview.scrollTop : 0,
+            currentFolderPath: currentFolderPath || folderPath || '',
             videoCurrentTime: videoDisplay ? videoDisplay.currentTime : 0,
             updatedAt: Date.now()
         };
@@ -163,21 +204,34 @@ function saveFolderViewState() {
     }
 }
 
-function getFolderViewState(rootPath) {
-    const rootKey = normalizeRootFolderPath(rootPath);
-    if (!rootKey) return null;
-
+function getFolderViewState(rootPath, folderPath) {
+    const compositeKey = makeStateCompositeKey(rootPath, folderPath);
     const states = getFolderViewStates();
-    return states[rootKey] || null;
+    if (states[compositeKey]) return states[compositeKey];
+
+    // 兼容旧版 v1（只有根目录一个状态）以及 __last__
+    if (folderPath === undefined || folderPath === null || folderPath === '') {
+        const rootKey = normalizeRootFolderPath(rootPath);
+        return states[rootKey + '::__last__'] || states[rootKey] || null;
+    }
+    return null;
 }
 
-function clearFolderViewState(rootPath) {
-    const rootKey = normalizeRootFolderPath(rootPath);
-    if (!rootKey) return;
-
+function clearFolderViewState(rootPath, folderPath) {
     try {
         const states = getFolderViewStates();
-        delete states[rootKey];
+        if (folderPath !== undefined && folderPath !== null) {
+            const compositeKey = makeStateCompositeKey(rootPath, folderPath);
+            delete states[compositeKey];
+        } else {
+            const rootKey = normalizeRootFolderPath(rootPath);
+            // 清除该根下所有
+            Object.keys(states).forEach(k => {
+                if (k === rootKey || k.startsWith(rootKey + '::')) {
+                    delete states[k];
+                }
+            });
+        }
         localStorage.setItem(FOLDER_VIEW_STATE_KEY, JSON.stringify(states));
     } catch (e) {
         console.error('清除文件夹阅读进度失败:', e);
@@ -254,7 +308,7 @@ function triggerDebouncedSave() {
     saveDebounceTimer = setTimeout(() => {
         syncCurrentContent();
         saveCurrentFile(); 
-    }, 300);
+    }, 400);
 }
 
 if (editor) {
@@ -801,12 +855,15 @@ btnRefresh.addEventListener('click', () => {
 });
 
 // ==================== 文件物理读写 ====================
-function restoreFolderViewState(rootPath) {
-    const state = getFolderViewState(rootPath);
-    if (!state || !state.fileKey) return;
+function restoreFolderViewState(rootPath, folderPath) {
+    const state = getFolderViewState(rootPath, folderPath);
+    if (!state || (!state.fileKey && !state.mediaPath)) return false;
 
-    if (fileDataMap.has(state.fileKey)) {
-        loadMdContent(state.fileKey);
+    const targetKey = state.fileKey || '';
+    if (!targetKey) return false;
+
+    if (fileDataMap.has(targetKey)) {
+        loadMdContent(targetKey);
 
         if (state.mode === 'preview') {
             currentMode = 'preview';
@@ -825,18 +882,19 @@ function restoreFolderViewState(rootPath) {
                 } else {
                     editor.scrollTop = Math.max(0, Number(state.editorScrollTop) || 0);
                 }
-                saveFolderViewState();
+                // 恢复后不立即覆盖新位置，等用户滚动再存
             });
         });
+        return true;
 
-    } else if (mediaUrlsMap.has(state.fileKey)) {
-        const displayPath = mediaPathsMap.get(state.fileKey);
+    } else if (mediaUrlsMap.has(targetKey)) {
+        const displayPath = mediaPathsMap.get(targetKey) || state.mediaPath;
 
         if (displayPath) {
             const fileName = displayPath.split('/').pop();
             const isVideo = VIDEO_REGEX.test(fileName);
 
-            previewMedia(state.fileKey, fileName, displayPath, isVideo);
+            previewMedia(targetKey, fileName, displayPath, isVideo);
 
             if (isVideo && Number(state.videoCurrentTime) > 0) {
                 const restoreVideoTime = () => {
@@ -851,8 +909,10 @@ function restoreFolderViewState(rootPath) {
                     videoDisplay.addEventListener('loadedmetadata', restoreVideoTime, { once: true });
                 }
             }
+            return true;
         }
     }
+    return false;
 }
 
 function loadMdContent(keyLower) {
@@ -1222,6 +1282,50 @@ btnDeleteFolder.addEventListener('click', () => {
     currentFolderPath = '';
     rescanDirectorySilently();
 });
+
+// ==================== 上次进度跳转（按选中文件夹恢复） ====================
+if (btnLastProgress) {
+    btnLastProgress.addEventListener('click', () => {
+        if (!currentRootFolderPath) {
+            alert('请先打开本地文件夹！');
+            return;
+        }
+
+        // 优先使用当前在树中选中的文件夹；若无则尝试当前查看内容所在文件夹
+        let targetFolder = currentFolderPath || '';
+        if (!targetFolder) {
+            targetFolder = getCurrentViewFolderPath();
+        }
+
+        if (!targetFolder) {
+            // 根目录情况：恢复该根的最近一次进度
+            const ok = restoreFolderViewState(currentRootFolderPath, '');
+            if (ok) {
+                closeDrawer();
+                alert('已跳转到根目录上次进度');
+            } else {
+                alert('该目录暂无保存的进度记录');
+            }
+            return;
+        }
+
+        const ok = restoreFolderViewState(currentRootFolderPath, targetFolder);
+        if (ok) {
+            closeDrawer();
+            // 高亮并展开到目标
+            setTimeout(() => {
+                if (activeMediaPath) {
+                    expandAndHighlightPath(activeMediaPath.toLowerCase(), mediaList, true);
+                } else if (currentFileKey) {
+                    expandAndHighlightPath(currentFileKey, mdList, true);
+                }
+            }, 50);
+            alert(`已跳转到文件夹「${targetFolder}」的上次进度`);
+        } else {
+            alert(`文件夹「${targetFolder}」暂无保存的进度记录\n（进入该文件夹下的图片/笔记后会自动记住）`);
+        }
+    });
+}
 
 // ==================== 剪切与粘贴功能 ====================
 if (btnCut) {
