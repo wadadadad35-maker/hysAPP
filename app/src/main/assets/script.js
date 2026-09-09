@@ -126,19 +126,12 @@ function normalizeFolderKey(path) {
     return (path || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').toLowerCase();
 }
 
-/** 获取当前查看内容所在的相对文件夹路径（用于按文件夹存进度） */
-function getCurrentViewFolderPath() {
-    if (activeMediaPath) {
-        const parts = activeMediaPath.replace(/\\/g, '/').split('/').filter(Boolean);
-        parts.pop();
-        return parts.join('/');
-    }
-    if (currentFileKey) {
-        const parts = currentFileKey.replace(/\\/g, '/').split('/').filter(Boolean);
-        parts.pop();
-        return parts.join('/');
-    }
-    return currentFolderPath || '';
+/** 获取当前媒体所在的相对文件夹路径（只用于媒体进度） */
+function getCurrentMediaFolderPath() {
+    if (!activeMediaPath) return '';
+    const parts = activeMediaPath.replace(/\\/g, '/').split('/').filter(Boolean);
+    parts.pop();
+    return parts.join('/');
 }
 
 function makeStateCompositeKey(rootPath, folderPath) {
@@ -157,42 +150,38 @@ function getFolderViewStates() {
     }
 }
 
+/**
+ * 只保存「媒体（图片/视频）」的进度。
+ * 正在看文章时完全不写进度，节省存储次数。
+ */
 function saveFolderViewState() {
     if (!currentRootFolderPath) return;
 
-    syncCurrentContent();
+    // 关键：只有当前正在查看媒体时才保存
+    if (!activeMediaPath || mediaViewer.style.display === 'none') {
+        return;
+    }
 
     const rootKey = normalizeRootFolderPath(currentRootFolderPath);
     if (!rootKey) return;
 
-    const folderPath = getCurrentViewFolderPath();
+    const folderPath = getCurrentMediaFolderPath();
     const compositeKey = makeStateCompositeKey(currentRootFolderPath, folderPath);
 
     try {
         const states = getFolderViewStates();
 
-        states[compositeKey] = {
+        const stateObj = {
             fileKey: currentFileKey || '',
             mediaPath: activeMediaPath || '',
-            mode: currentMode || 'edit',
-            editorScrollTop: editor ? editor.scrollTop : 0,
-            previewScrollTop: preview ? preview.scrollTop : 0,
-            currentFolderPath: currentFolderPath || folderPath || '',
             videoCurrentTime: videoDisplay ? videoDisplay.currentTime : 0,
             updatedAt: Date.now()
         };
 
-        // 同时更新该根目录的「最近一次」快捷入口（兼容打开根目录时自动恢复）
-        states[rootKey + '::__last__'] = {
-            fileKey: currentFileKey || '',
-            mediaPath: activeMediaPath || '',
-            mode: currentMode || 'edit',
-            editorScrollTop: editor ? editor.scrollTop : 0,
-            previewScrollTop: preview ? preview.scrollTop : 0,
-            currentFolderPath: currentFolderPath || folderPath || '',
-            videoCurrentTime: videoDisplay ? videoDisplay.currentTime : 0,
-            updatedAt: Date.now()
-        };
+        states[compositeKey] = stateObj;
+
+        // 同时更新该根目录的「最近一次媒体」快捷入口
+        states[rootKey + '::__last__'] = { ...stateObj };
 
         const entries = Object.entries(states)
             .sort((a, b) => (b[1]?.updatedAt || 0) - (a[1]?.updatedAt || 0))
@@ -200,7 +189,7 @@ function saveFolderViewState() {
 
         localStorage.setItem(FOLDER_VIEW_STATE_KEY, JSON.stringify(Object.fromEntries(entries)));
     } catch (e) {
-        console.error('保存文件夹阅读进度失败:', e);
+        console.error('保存媒体阅读进度失败:', e);
     }
 }
 
@@ -855,71 +844,59 @@ btnRefresh.addEventListener('click', () => {
 });
 
 // ==================== 文件物理读写 ====================
+/**
+ * 只恢复「媒体（图片/视频）」进度。
+ * 文章进度已不再保存，这里直接忽略。
+ */
 function restoreFolderViewState(rootPath, folderPath) {
     const state = getFolderViewState(rootPath, folderPath);
-    if (!state || (!state.fileKey && !state.mediaPath)) return false;
+    if (!state) return false;
 
-    const targetKey = state.fileKey || '';
+    // 优先用 mediaPath，其次 fileKey（兼容旧数据）
+    const targetKey = (state.mediaPath || state.fileKey || '').toLowerCase().replace(/\\/g, '/');
     if (!targetKey) return false;
 
-    if (fileDataMap.has(targetKey)) {
-        loadMdContent(targetKey);
+    // 只处理媒体文件
+    if (!mediaUrlsMap.has(targetKey)) {
+        // 尝试用 mediaPath 再查一次
+        const altKey = (state.mediaPath || '').toLowerCase().replace(/\\/g, '/');
+        if (!altKey || !mediaUrlsMap.has(altKey)) return false;
+        return restoreMediaByKey(altKey, state);
+    }
 
-        if (state.mode === 'preview') {
-            currentMode = 'preview';
-            btnModePreview.classList.add('active');
-            btnModeEdit.classList.remove('active');
-            mediaViewer.style.display = 'none';
-            editor.style.display = 'none';
-            preview.style.display = 'block';
-            renderMarkdown();
-        }
+    return restoreMediaByKey(targetKey, state);
+}
 
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                if (state.mode === 'preview') {
-                    preview.scrollTop = Math.max(0, Number(state.previewScrollTop) || 0);
-                } else {
-                    editor.scrollTop = Math.max(0, Number(state.editorScrollTop) || 0);
-                }
-                // 恢复后不立即覆盖新位置，等用户滚动再存
-            });
-        });
-        return true;
+function restoreMediaByKey(keyLower, state) {
+    const displayPath = mediaPathsMap.get(keyLower) || state.mediaPath;
+    if (!displayPath) return false;
 
-    } else if (mediaUrlsMap.has(targetKey)) {
-        const displayPath = mediaPathsMap.get(targetKey) || state.mediaPath;
+    const fileName = displayPath.split('/').pop();
+    const isVideo = VIDEO_REGEX.test(fileName);
 
-        if (displayPath) {
-            const fileName = displayPath.split('/').pop();
-            const isVideo = VIDEO_REGEX.test(fileName);
+    previewMedia(keyLower, fileName, displayPath, isVideo);
 
-            previewMedia(targetKey, fileName, displayPath, isVideo);
+    if (isVideo && Number(state.videoCurrentTime) > 0) {
+        const restoreVideoTime = () => {
+            try {
+                videoDisplay.currentTime = Number(state.videoCurrentTime) || 0;
+            } catch (e) {}
+        };
 
-            if (isVideo && Number(state.videoCurrentTime) > 0) {
-                const restoreVideoTime = () => {
-                    try {
-                        videoDisplay.currentTime = Number(state.videoCurrentTime) || 0;
-                    } catch (e) {}
-                };
-
-                if (videoDisplay.readyState >= 1) {
-                    restoreVideoTime();
-                } else {
-                    videoDisplay.addEventListener('loadedmetadata', restoreVideoTime, { once: true });
-                }
-            }
-            return true;
+        if (videoDisplay.readyState >= 1) {
+            restoreVideoTime();
+        } else {
+            videoDisplay.addEventListener('loadedmetadata', restoreVideoTime, { once: true });
         }
     }
-    return false;
+    return true;
 }
 
 function loadMdContent(keyLower) {
     syncCurrentContent();
 
-    if (currentRootFolderPath && currentFileKey && currentFileKey !== keyLower) {
-        // 切换文件前先保存旧文件的滚动位置
+    // 从媒体切到文章时，先把当前媒体进度存一下
+    if (currentRootFolderPath && activeMediaPath) {
         saveFolderViewState();
     }
 
@@ -1283,7 +1260,7 @@ btnDeleteFolder.addEventListener('click', () => {
     rescanDirectorySilently();
 });
 
-// ==================== 上次进度跳转（按选中文件夹恢复） ====================
+// ==================== 上次进度跳转（只恢复媒体图片/视频进度） ====================
 if (btnLastProgress) {
     btnLastProgress.addEventListener('click', () => {
         if (!currentRootFolderPath) {
@@ -1291,20 +1268,25 @@ if (btnLastProgress) {
             return;
         }
 
-        // 优先使用当前在树中选中的文件夹；若无则尝试当前查看内容所在文件夹
+        // 优先使用当前在树中选中的文件夹；若无则尝试当前媒体所在文件夹
         let targetFolder = currentFolderPath || '';
         if (!targetFolder) {
-            targetFolder = getCurrentViewFolderPath();
+            targetFolder = getCurrentMediaFolderPath();
         }
 
         if (!targetFolder) {
-            // 根目录情况：恢复该根的最近一次进度
+            // 根目录情况：恢复该根的最近一次媒体进度
             const ok = restoreFolderViewState(currentRootFolderPath, '');
             if (ok) {
                 closeDrawer();
-                alert('已跳转到根目录上次进度');
+                setTimeout(() => {
+                    if (activeMediaPath) {
+                        expandAndHighlightPath(activeMediaPath.toLowerCase(), mediaList, true);
+                    }
+                }, 50);
+                alert('已跳转到根目录上次图片/媒体进度');
             } else {
-                alert('该目录暂无保存的进度记录');
+                alert('该目录暂无保存的图片进度记录');
             }
             return;
         }
@@ -1312,17 +1294,14 @@ if (btnLastProgress) {
         const ok = restoreFolderViewState(currentRootFolderPath, targetFolder);
         if (ok) {
             closeDrawer();
-            // 高亮并展开到目标
             setTimeout(() => {
                 if (activeMediaPath) {
                     expandAndHighlightPath(activeMediaPath.toLowerCase(), mediaList, true);
-                } else if (currentFileKey) {
-                    expandAndHighlightPath(currentFileKey, mdList, true);
                 }
             }, 50);
-            alert(`已跳转到文件夹「${targetFolder}」的上次进度`);
+            alert(`已跳转到文件夹「${targetFolder}」的上次图片进度`);
         } else {
-            alert(`文件夹「${targetFolder}」暂无保存的进度记录\n（进入该文件夹下的图片/笔记后会自动记住）`);
+            alert(`文件夹「${targetFolder}」暂无保存的图片进度\n（进入该文件夹下的图片后会自动记住）`);
         }
     });
 }
@@ -2032,10 +2011,7 @@ btnModeEdit.addEventListener('click', () => {
     mediaViewer.style.display = 'none';
     editor.style.display = 'block';
     preview.style.display = 'none';
-
-    if (currentRootFolderPath) {
-        saveFolderViewState();
-    }
+    // 文章模式不保存进度
 });
 
 btnModePreview.addEventListener('click', () => {
@@ -2047,29 +2023,10 @@ btnModePreview.addEventListener('click', () => {
     editor.style.display = 'none';
     preview.style.display = 'block';
     renderMarkdown();
-
-    requestAnimationFrame(() => {
-        if (currentRootFolderPath) {
-            saveFolderViewState();
-        }
-    });
+    // 文章模式不保存进度
 });
 
-// 编辑器/预览滚动时低频保存阅读进度
-let viewStateSaveTimer = null;
-
-function scheduleSaveFolderViewState() {
-    if (viewStateSaveTimer) return;
-
-    viewStateSaveTimer = setTimeout(() => {
-        viewStateSaveTimer = null;
-        saveFolderViewState();
-    }, 250);
-}
-
-if (editor) editor.addEventListener('scroll', scheduleSaveFolderViewState, { passive: true });
-if (preview) preview.addEventListener('scroll', scheduleSaveFolderViewState, { passive: true });
-
+// 页面隐藏/离开时，如果当前正在看媒体，才保存进度
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
         saveFolderViewState();
