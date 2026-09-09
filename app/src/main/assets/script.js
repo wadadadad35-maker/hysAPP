@@ -254,7 +254,7 @@ function triggerDebouncedSave() {
     saveDebounceTimer = setTimeout(() => {
         syncCurrentContent();
         saveCurrentFile(); 
-    }, 500);
+    }, 300);
 }
 
 if (editor) {
