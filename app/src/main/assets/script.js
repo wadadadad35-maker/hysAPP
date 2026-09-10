@@ -105,7 +105,9 @@ let currentModalMode = 'paged';
 let streamObserver = null;
 let lastRenderedText = '';
 
-let saveDebounceTimer = null; 
+let saveDebounceTimer = null;
+let isFileDirty = false;
+let isSavingFile = false;
 
 // 剪贴板全局状态
 let clipboardItem = null;
@@ -295,10 +297,6 @@ function renderRecentPaths() {
 
 // ==================== 自动防抖保存机制 ====================
 function syncCurrentContent() {
-    if (saveDebounceTimer) {
-        clearTimeout(saveDebounceTimer);
-        saveDebounceTimer = null;
-    }
     if (!currentFileKey) return;
     const item = fileDataMap.get(currentFileKey);
     if (item && editor) {
@@ -306,17 +304,33 @@ function syncCurrentContent() {
     }
 }
 
+function cancelPendingSave() {
+    if (saveDebounceTimer) {
+        clearTimeout(saveDebounceTimer);
+        saveDebounceTimer = null;
+    }
+}
+
+function markFileDirty() {
+    isFileDirty = true;
+    if (btnSave) {
+        btnSave.textContent = '保存中…';
+    }
+}
+
 function triggerDebouncedSave() {
-    if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+    cancelPendingSave();
     saveDebounceTimer = setTimeout(() => {
-        syncCurrentContent();
-        saveCurrentFile(); 
+        saveDebounceTimer = null;
+        saveCurrentFile();
     }, 400);
 }
 
 if (editor) {
     editor.addEventListener('input', () => {
         editor.classList.remove('is-searching');
+        syncCurrentContent();
+        markFileDirty();
         triggerDebouncedSave();
     });
     
@@ -767,6 +781,7 @@ function executeFolderScan(inputPath, isSilent = false) {
 
     // 切换目录前保存当前目录的状态
     if (isSwitchingFolder) {
+        flushCurrentFileBeforeLeave();
         saveFolderViewState();
     } else {
         syncCurrentContent();
@@ -852,7 +867,7 @@ btnRefresh.addEventListener('click', () => {
         alert("请先打开本地文件夹！");
         return;
     }
-    syncCurrentContent();
+    flushCurrentFileBeforeLeave();
     rescanDirectorySilently();
     alert("目录已成功扫描刷新！");
 });
@@ -951,10 +966,15 @@ function restoreMediaByKey(keyLower, state) {
 }
 
 function loadMdContent(keyLower) {
-    syncCurrentContent();
+    if (currentFileKey && currentFileKey !== keyLower) {
+        // 切换文件前先取消防抖并立即把旧文件落盘，避免粘贴后立刻切换导致内容丢失。
+        flushCurrentFileBeforeLeave();
+    } else {
+        syncCurrentContent();
+    }
 
     if (currentRootFolderPath && currentFileKey && currentFileKey !== keyLower) {
-        // 切换文件前先保存旧文件的滚动位置
+        // 切换文件前保存旧文件的滚动位置
         saveFolderViewState();
     }
 
@@ -988,6 +1008,8 @@ function loadMdContent(keyLower) {
     }
 
     editor.value = item.text || "";
+    isFileDirty = false;
+    cancelPendingSave();
     editor.removeAttribute('readonly');
     btnSave.removeAttribute('disabled');
 
@@ -1007,29 +1029,69 @@ function loadMdContent(keyLower) {
     }
 }
 
-function saveCurrentFile() {
+function saveCurrentFile(options = {}) {
+    const force = !!options.force;
+    cancelPendingSave();
     syncCurrentContent();
+
     const item = fileDataMap.get(currentFileKey);
-    if (!item || !item.fullPath) return;
+    if (!item || !item.fullPath || !editor) return false;
+    if (!force && !isFileDirty) return true;
+
+    if (isSavingFile) return false;
+    isSavingFile = true;
 
     let writeSuccess = false;
-    if (window.AndroidFS) {
-        writeSuccess = window.AndroidFS.writeFile(item.fullPath, editor.value);
+    try {
+        if (window.AndroidFS && typeof window.AndroidFS.writeFile === 'function') {
+            writeSuccess = window.AndroidFS.writeFile(item.fullPath, editor.value);
+        }
+    } catch (e) {
+        console.error('保存文件失败:', e);
+    } finally {
+        isSavingFile = false;
     }
 
     if (writeSuccess) {
+        isFileDirty = false;
         btnSave.textContent = '已保存！';
         btnSave.style.background = '#0e639c';
         setTimeout(() => {
-            btnSave.textContent = '保存';
-            btnSave.style.background = '#28a745';
+            if (!isFileDirty) {
+                btnSave.textContent = '保存';
+                btnSave.style.background = '#28a745';
+            }
         }, 1200);
     } else {
+        btnSave.textContent = '保存失败';
         alert('写入物理磁盘失败！');
     }
+    return writeSuccess;
 }
 
-btnSave.addEventListener('click', saveCurrentFile);
+// 在切换文件、目录或离开 WebView 前，必须把当前编辑器内容立即落盘。
+function flushCurrentFileBeforeLeave() {
+    return saveCurrentFile({ force: true });
+}
+
+btnSave.addEventListener('click', () => saveCurrentFile({ force: true }));
+
+// Android WebView 切到后台/锁屏/离开页面时立即落盘。
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+        flushCurrentFileBeforeLeave();
+        saveFolderViewState();
+    }
+});
+
+window.addEventListener('pagehide', () => {
+    flushCurrentFileBeforeLeave();
+    saveFolderViewState();
+});
+
+window.addEventListener('beforeunload', () => {
+    flushCurrentFileBeforeLeave();
+});
 
 // ==================== 新建 / 重命名 / 删除文件及文件夹 ====================
 btnCreateFile.addEventListener('click', () => {
@@ -1458,7 +1520,11 @@ if (btnPaste) {
 
 // ==================== 媒体预览、大图与上下触碰切图/流式查看 ====================
 function previewMedia(keyLower, fileName, displayPath, isVideo) {
-    syncCurrentContent();
+    if (currentFileKey && currentFileKey !== keyLower) {
+        flushCurrentFileBeforeLeave();
+    } else {
+        syncCurrentContent();
+    }
 
     if (currentRootFolderPath && currentFileKey && currentFileKey !== keyLower) {
         saveFolderViewState();
