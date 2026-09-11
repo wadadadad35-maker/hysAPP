@@ -17,6 +17,7 @@ const btnDeleteFile = document.getElementById('btn-delete-file');
 const btnDeleteFolder = document.getElementById('btn-delete-folder');
 const btnTriggerFolder = document.getElementById('btn-trigger-folder');
 const btnLastProgress = document.getElementById('btn-last-progress');
+const btnSwitchResource = document.getElementById('btn-switch-resource');
 
 const mdList = document.getElementById('md-list');
 const mediaList = document.getElementById('media-list');
@@ -1426,6 +1427,181 @@ if (btnLastProgress) {
             alert(`已跳转到文件夹「${targetFolder}」的上次图片进度`);
         } else {
             alert(`文件夹「${targetFolder}」暂无保存的图片进度\n（进入该文件夹下的图片后会自动记住）`);
+        }
+    });
+}
+
+// ==================== 切换资源（笔记目录 ↔ 媒体资源 同一文件夹） ====================
+/**
+ * 根据相对路径展开并高亮目标树中的文件夹（不要求文件存在）
+ * @param {string} folderPath 相对路径，如 "快乐文件夹" 或 "a/b"
+ * @param {HTMLElement} containerEl mdList 或 mediaList
+ * @returns {boolean} 是否成功展开
+ */
+function expandAndHighlightFolder(folderPath, containerEl) {
+    if (!folderPath || !containerEl) return false;
+    const normalized = folderPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').toLowerCase();
+    if (!normalized) return false;
+
+    const parts = normalized.split('/').filter(Boolean);
+    let currentUl = containerEl.querySelector(':scope > ul.tree-node');
+    if (!currentUl) return false;
+
+    let matchedFolderLi = null;
+
+    for (let i = 0; i < parts.length; i++) {
+        const folderName = parts[i];
+        const folderLis = currentUl.querySelectorAll(':scope > li.tree-folder');
+        matchedFolderLi = null;
+
+        for (const li of folderLis) {
+            if (li.dataset.folderName === folderName) {
+                matchedFolderLi = li;
+                break;
+            }
+        }
+
+        if (!matchedFolderLi) return false;
+
+        matchedFolderLi.style.display = 'block';
+        const childrenUl = matchedFolderLi._ensureRendered
+            ? matchedFolderLi._ensureRendered()
+            : matchedFolderLi.querySelector(':scope > ul');
+
+        if (childrenUl) {
+            childrenUl.style.display = 'block';
+            const arrow = matchedFolderLi.querySelector(':scope > .folder-header .arrow');
+            if (arrow) arrow.textContent = '▼';
+            currentUl = childrenUl;
+        } else if (i < parts.length - 1) {
+            return false;
+        }
+    }
+
+    if (matchedFolderLi) {
+        document.querySelectorAll('.tree-file').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('active'));
+        const header = matchedFolderLi.querySelector(':scope > .folder-header');
+        if (header) {
+            header.classList.add('active');
+            currentFolderPath = matchedFolderLi.dataset.folderPath || folderPath;
+            currentFileKey = '';
+            setTimeout(() => {
+                matchedFolderLi.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }, 80);
+        }
+        return true;
+    }
+    return false;
+}
+
+/**
+ * 获取当前选中项所属的相对文件夹路径
+ * - 正在看媒体 → 媒体所在文件夹
+ * - 正在看笔记 → 笔记所在文件夹
+ * - 仅选中了文件夹 → 该文件夹本身
+ */
+function getCurrentSelectedFolderPath() {
+    if (mediaViewer && mediaViewer.style.display !== 'none' && activeMediaPath) {
+        return getCurrentMediaFolderPath();
+    }
+    if (currentFileKey) {
+        const parts = currentFileKey.replace(/\\/g, '/').split('/').filter(Boolean);
+        parts.pop();
+        return parts.join('/');
+    }
+    if (currentFolderPath) {
+        return currentFolderPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    }
+    return '';
+}
+
+/**
+ * 判断当前侧是「媒体侧」还是「笔记侧」
+ * 媒体侧：正在预览媒体，或在媒体树中选中了文件夹
+ */
+function isCurrentlyOnMediaSide() {
+    if (mediaViewer && mediaViewer.style.display !== 'none' && activeMediaPath) {
+        return true;
+    }
+    // 若当前选中的是文件夹，且该文件夹在媒体树中存在对应节点，则视为可从媒体侧切换
+    // 这里以「最近一次点击的文件类型」为主：有 activeMediaPath 则媒体侧，有 currentFileKey 则笔记侧
+    // 仅选文件夹时，根据抽屉内 active 的 folder-header 所在列表判断
+    const activeFolderHeader = document.querySelector('#media-list .folder-header.active');
+    if (activeFolderHeader) return true;
+    return false;
+}
+
+if (btnSwitchResource) {
+    btnSwitchResource.addEventListener('click', () => {
+        if (!currentRootFolderPath) {
+            alert('请先打开本地文件夹！');
+            return;
+        }
+
+        const folderPath = getCurrentSelectedFolderPath();
+        // 根目录时 folderPath 为空字符串，仍然允许切换两侧根节点
+
+        const onMediaSide = isCurrentlyOnMediaSide();
+        // 目标侧：当前在媒体侧 → 切到笔记目录；当前在笔记侧 → 切到媒体资源
+        const targetContainer = onMediaSide ? mdList : mediaList;
+        const sideName = onMediaSide ? '笔记目录' : '媒体资源';
+
+        // 先重置折叠，再展开目标侧
+        resetTreeCollapse();
+
+        let ok = false;
+        if (!folderPath) {
+            // 根目录：直接滚动到对应列表顶部并清除文件选中
+            document.querySelectorAll('.tree-file').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('active'));
+            currentFolderPath = '';
+            currentFileKey = '';
+            if (onMediaSide) {
+                // 切到笔记：隐藏媒体预览，回到编辑区空状态
+                if (mediaViewer) mediaViewer.style.display = 'none';
+                activeMediaPath = '';
+                if (modeToggleGroup) modeToggleGroup.style.display = 'flex';
+                if (btnSave) btnSave.style.display = 'block';
+                if (btnCopyNoteTag) btnCopyNoteTag.style.display = 'none';
+                fileTitle.textContent = currentRootFolderPath || '未选择文件';
+            }
+            const sectionTitle = targetContainer.previousElementSibling;
+            if (sectionTitle) {
+                setTimeout(() => sectionTitle.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
+            }
+            ok = true;
+        } else {
+            ok = expandAndHighlightFolder(folderPath, targetContainer);
+            if (ok && onMediaSide) {
+                // 从媒体切到笔记：关闭媒体预览，准备看笔记
+                if (mediaViewer) mediaViewer.style.display = 'none';
+                activeMediaPath = '';
+                if (modeToggleGroup) modeToggleGroup.style.display = 'flex';
+                if (btnSave) btnSave.style.display = 'block';
+                if (btnCopyNoteTag) btnCopyNoteTag.style.display = 'none';
+                fileTitle.textContent = folderPath || currentRootFolderPath || '未选择文件';
+                editor.value = '';
+                editor.setAttribute('readonly', 'true');
+                preview.innerHTML = '';
+            }
+        }
+
+        if (ok) {
+            // 确保抽屉打开，方便用户看到另一侧
+            if (!bottomSheet.classList.contains('active')) {
+                openDrawer();
+            }
+            // 轻微提示
+            const tip = folderPath
+                ? `已切换到「${folderPath}」的${sideName}`
+                : `已切换到根目录的${sideName}`;
+            // 用短时 toast 式提示，避免打断操作；若环境无 toast 则静默
+            if (typeof console !== 'undefined') console.log(tip);
+        } else {
+            alert(folderPath
+                ? `在${sideName}中未找到文件夹「${folderPath}」`
+                : `无法切换到${sideName}`);
         }
     });
 }
