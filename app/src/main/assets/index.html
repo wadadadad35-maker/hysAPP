@@ -9,7 +9,7 @@
     <script src="marked.min.js"></script>
     
     <!-- 引入外部 CSS 样式 -->
-    <link rel="stylesheet" href="style.css?v=10">
+    <link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 
@@ -29,6 +29,7 @@
                 </div>
                 <button class="btn btn-save" id="btn-save" disabled>保存</button>
                 <button class="btn btn-refresh" id="btn-refresh">🔄 刷新目录</button>
+                <button class="btn btn-global-search" id="btn-global-search" title="全局搜索所有笔记">🔍 全局搜索</button>
                 
                 <!-- 当前笔记内搜索组件 -->
                 <div class="note-search-box">
@@ -161,9 +162,25 @@
         </div>
     </div>
 
+
+    <!-- 全局搜索右侧滑出面板 -->
+    <div id="global-search-overlay"></div>
+    <div id="global-search-panel">
+        <div class="gs-header">
+            <span class="gs-title">🔍 全局搜索</span>
+            <button class="btn btn-subtle" id="btn-close-global-search">关闭</button>
+        </div>
+        <div class="gs-search-row">
+            <input type="text" id="global-search-input" class="search-input" placeholder="输入关键词，搜索所有笔记..." autocomplete="off">
+            <button class="btn" id="btn-do-global-search">搜索</button>
+        </div>
+        <div class="gs-status" id="global-search-status">输入关键词后点击搜索，将扫描全部笔记内容</div>
+        <div class="gs-results" id="global-search-results"></div>
+    </div>
+
     <!-- 隐藏的本地文件导入选择器 -->
     <input type="file" id="import-file-input" style="display: none;" multiple>
 
-    <script src="script.js?v=14"></script>
+    <script src="script.js?v=15"></script>
 </body>
 </html>

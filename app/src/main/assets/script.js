@@ -2388,3 +2388,251 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     }
 });
+
+// ==================== 全局文字搜索（右侧滑出面板） ====================
+const globalSearchOverlay = document.getElementById('global-search-overlay');
+const globalSearchPanel = document.getElementById('global-search-panel');
+const btnGlobalSearch = document.getElementById('btn-global-search');
+const btnCloseGlobalSearch = document.getElementById('btn-close-global-search');
+const globalSearchInput = document.getElementById('global-search-input');
+const btnDoGlobalSearch = document.getElementById('btn-do-global-search');
+const globalSearchStatus = document.getElementById('global-search-status');
+const globalSearchResults = document.getElementById('global-search-results');
+
+let globalSearchInProgress = false;
+
+function openGlobalSearchPanel() {
+    if (globalSearchPanel) globalSearchPanel.classList.add('active');
+    if (globalSearchOverlay) globalSearchOverlay.classList.add('active');
+    setTimeout(() => {
+        if (globalSearchInput) {
+            globalSearchInput.focus();
+            globalSearchInput.select();
+        }
+    }, 280);
+}
+
+function closeGlobalSearchPanel() {
+    if (globalSearchPanel) globalSearchPanel.classList.remove('active');
+    if (globalSearchOverlay) globalSearchOverlay.classList.remove('active');
+}
+
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+/**
+ * 从文本中截取包含关键词的上下文片段，并高亮关键词
+ */
+function buildSnippet(text, query, maxLen = 120) {
+    if (!text || !query) return '';
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    const idx = lowerText.indexOf(lowerQuery);
+    if (idx === -1) return escapeHtml(text.slice(0, maxLen)) + (text.length > maxLen ? '…' : '');
+
+    const half = Math.floor((maxLen - query.length) / 2);
+    let start = Math.max(0, idx - half);
+    let end = Math.min(text.length, idx + query.length + half);
+
+    // 尽量在词边界截断
+    if (start > 0) {
+        const space = text.lastIndexOf(' ', start + 10);
+        if (space > start - 20) start = space + 1;
+    }
+    if (end < text.length) {
+        const space = text.indexOf(' ', end - 10);
+        if (space !== -1 && space < end + 20) end = space;
+    }
+
+    let snippet = text.slice(start, end);
+    const prefix = start > 0 ? '…' : '';
+    const suffix = end < text.length ? '…' : '';
+
+    // 高亮所有匹配（不区分大小写）
+    const safeQ = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('(' + safeQ + ')', 'gi');
+    const highlighted = escapeHtml(snippet).replace(re, '<mark>$1</mark>');
+    return prefix + highlighted + suffix;
+}
+
+/**
+ * 统计文本中关键词出现次数
+ */
+function countMatches(text, query) {
+    if (!text || !query) return 0;
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    let count = 0;
+    let pos = 0;
+    while ((pos = lowerText.indexOf(lowerQuery, pos)) !== -1) {
+        count++;
+        pos += lowerQuery.length;
+    }
+    return count;
+}
+
+/**
+ * 确保文件内容已加载到 fileDataMap（必要时通过 AndroidFS 读取）
+ */
+function ensureFileTextLoaded(item) {
+    if (!item) return '';
+    if (item.text !== undefined && item.text !== null && item.text !== '') {
+        return item.text;
+    }
+    // 当前正在编辑的文件，优先用编辑器内容
+    if (currentFileKey && fileDataMap.get(currentFileKey) === item && editor) {
+        item.text = editor.value;
+        return item.text;
+    }
+    if (window.AndroidFS && item.fullPath && typeof window.AndroidFS.readFile === 'function') {
+        try {
+            item.text = window.AndroidFS.readFile(item.fullPath) || '';
+        } catch (e) {
+            console.error('读取文件失败:', item.path, e);
+            item.text = '';
+        }
+    } else {
+        item.text = item.text || '';
+    }
+    return item.text;
+}
+
+/**
+ * 执行全局搜索
+ */
+function performGlobalSearch() {
+    if (globalSearchInProgress) return;
+    const query = (globalSearchInput ? globalSearchInput.value : '').trim();
+    if (!query) {
+        if (globalSearchStatus) globalSearchStatus.textContent = '请输入要搜索的关键词';
+        if (globalSearchResults) globalSearchResults.innerHTML = '';
+        return;
+    }
+    if (!currentRootFolderPath || fileDataMap.size === 0) {
+        if (globalSearchStatus) globalSearchStatus.textContent = '请先打开本地文件夹';
+        return;
+    }
+
+    globalSearchInProgress = true;
+    if (globalSearchStatus) globalSearchStatus.textContent = `正在扫描 ${fileDataMap.size} 个笔记…`;
+    if (globalSearchResults) {
+        globalSearchResults.innerHTML = '<div class="gs-loading">⏳ 正在搜索，请稍候…</div>';
+    }
+
+    // 用 requestAnimationFrame / setTimeout 让 UI 先刷新，再同步扫描
+    setTimeout(() => {
+        const results = [];
+        let scanned = 0;
+        const total = fileDataMap.size;
+
+        fileDataMap.forEach((item, keyLower) => {
+            scanned++;
+            const text = ensureFileTextLoaded(item);
+            if (!text) return;
+            const lowerText = text.toLowerCase();
+            const lowerQuery = query.toLowerCase();
+            if (lowerText.indexOf(lowerQuery) !== -1) {
+                const matchCount = countMatches(text, query);
+                const snippet = buildSnippet(text, query);
+                results.push({
+                    keyLower,
+                    path: item.path,
+                    name: item.name,
+                    matchCount,
+                    snippet
+                });
+            }
+        });
+
+        // 按匹配次数降序，再按路径排序
+        results.sort((a, b) => {
+            if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
+            return a.path.localeCompare(b.path, 'zh-CN');
+        });
+
+        renderGlobalSearchResults(results, query, scanned);
+        globalSearchInProgress = false;
+    }, 30);
+}
+
+function renderGlobalSearchResults(results, query, scanned) {
+    if (!globalSearchResults) return;
+
+    if (globalSearchStatus) {
+        globalSearchStatus.textContent = results.length > 0
+            ? `找到 ${results.length} 篇含「${query}」的笔记（已扫描 ${scanned} 个）`
+            : `未找到含「${query}」的笔记（已扫描 ${scanned} 个）`;
+    }
+
+    if (results.length === 0) {
+        globalSearchResults.innerHTML = '<div class="gs-empty">没有匹配的笔记<br>试试其他关键词</div>';
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    results.forEach(r => {
+        const div = document.createElement('div');
+        div.className = 'gs-result-item';
+        div.dataset.key = r.keyLower;
+        div.innerHTML = `
+            <div class="gs-result-path">
+                <span>📄 ${escapeHtml(r.path)}</span>
+                <span class="gs-match-count">${r.matchCount} 处</span>
+            </div>
+            <div class="gs-result-snippet">${r.snippet}</div>
+        `;
+        div.addEventListener('click', () => {
+            closeGlobalSearchPanel();
+            // 打开笔记，并在编辑模式下跳到第一个匹配位置
+            loadMdContent(r.keyLower);
+            // 若当前是预览模式，切换到编辑以便定位；或直接用笔记内搜索
+            setTimeout(() => {
+                if (noteSearchInput) {
+                    noteSearchInput.value = query;
+                }
+                // 触发笔记内搜索定位
+                if (typeof performNoteSearch === 'function') {
+                    // 确保在编辑模式以便 setSelectionRange
+                    if (currentMode !== 'edit' && btnModeEdit) {
+                        btnModeEdit.click();
+                    }
+                    setTimeout(() => {
+                        performNoteSearch();
+                    }, 80);
+                }
+            }, 120);
+        });
+        fragment.appendChild(div);
+    });
+    globalSearchResults.innerHTML = '';
+    globalSearchResults.appendChild(fragment);
+}
+
+// 事件绑定
+if (btnGlobalSearch) {
+    btnGlobalSearch.addEventListener('click', () => {
+        openGlobalSearchPanel();
+    });
+}
+if (btnCloseGlobalSearch) {
+    btnCloseGlobalSearch.addEventListener('click', closeGlobalSearchPanel);
+}
+if (globalSearchOverlay) {
+    globalSearchOverlay.addEventListener('click', closeGlobalSearchPanel);
+}
+if (btnDoGlobalSearch) {
+    btnDoGlobalSearch.addEventListener('click', performGlobalSearch);
+}
+if (globalSearchInput) {
+    globalSearchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            performGlobalSearch();
+        }
+    });
+}
