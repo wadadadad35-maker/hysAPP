@@ -9,7 +9,7 @@
     <script src="marked.min.js"></script>
     
     <!-- 引入外部 CSS 样式 -->
-    <link rel="stylesheet" href="style.css?v=11">
+    <link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 
@@ -51,9 +51,10 @@
             <!-- 媒体查看区 -->
             <div id="media-viewer">
                 <img id="img-display" src="" alt="图片预览" style="display:none;">
-                <video id="video-display" controls style="display:none;"></video>
+                <video id="video-display" controls playsinline webkit-playsinline style="display:none;"></video>
                 <div class="media-actions">
                     <button class="btn btn-subtle" id="btn-zoom-img" style="display:none;">查看大图</button>
+                    <button class="btn btn-subtle" id="btn-fullscreen-video" style="display:none;">⛶ 全屏</button>
                     <button class="btn btn-subtle" id="btn-copy-tag">复制图片语法</button>
                 </div>
             </div>
@@ -181,6 +182,6 @@
     <!-- 隐藏的本地文件导入选择器 -->
     <input type="file" id="import-file-input" style="display: none;" multiple>
 
-    <script src="script.js?v=15"></script>
+    <script src="script.js?v=16"></script>
 </body>
 </html>

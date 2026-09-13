@@ -36,6 +36,7 @@ const imgDisplay = document.getElementById('img-display');
 const videoDisplay = document.getElementById('video-display');
 const btnCopyTag = document.getElementById('btn-copy-tag');
 const btnZoomImg = document.getElementById('btn-zoom-img');
+const btnFullscreenVideo = document.getElementById('btn-fullscreen-video');
 
 const btnCopyNoteTag = document.getElementById('btn-copy-note-tag');
 
@@ -1694,6 +1695,92 @@ if (btnPaste) {
     });
 }
 
+// ==================== 视频全屏与封面辅助函数 ====================
+/**
+ * 判断当前视频是否处于全屏状态
+ */
+function isVideoInFullscreen() {
+    const video = videoDisplay;
+    if (!video) return false;
+    return !!(
+        document.fullscreenElement === video ||
+        document.webkitFullscreenElement === video ||
+        video.webkitDisplayingFullscreen === true
+    );
+}
+
+/**
+ * 尝试从视频第一帧生成封面（poster）
+ */
+function tryGenerateVideoPoster(videoEl) {
+    if (!videoEl) return;
+    videoEl.poster = ''; // 先清空
+
+    const generate = () => {
+        if (!videoEl.videoWidth || !videoEl.videoHeight) return;
+        try {
+            const maxW = 640;
+            const ratio = videoEl.videoWidth / videoEl.videoHeight;
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.min(videoEl.videoWidth, maxW);
+            canvas.height = Math.round(canvas.width / ratio);
+
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+            videoEl.poster = canvas.toDataURL('image/jpeg', 0.75);
+        } catch (err) {
+            console.warn('生成视频封面失败:', err);
+        }
+    };
+
+    const onSeeked = () => {
+        videoEl.removeEventListener('seeked', onSeeked);
+        generate();
+        // 回到开头
+        try {
+            videoEl.currentTime = 0;
+        } catch (e) {}
+    };
+
+    const onLoadedMeta = () => {
+        videoEl.removeEventListener('loadedmetadata', onLoadedMeta);
+        // 轻微 seek 确保有可用帧
+        const seekTo = Math.min(0.15, (videoEl.duration || 1) * 0.05);
+        videoEl.addEventListener('seeked', onSeeked, { once: true });
+        try {
+            videoEl.currentTime = seekTo;
+        } catch (e) {
+            // 如果 seek 失败，直接尝试生成
+            generate();
+        }
+    };
+
+    if (videoEl.readyState >= 1) {
+        onLoadedMeta();
+    } else {
+        videoEl.addEventListener('loadedmetadata', onLoadedMeta, { once: true });
+    }
+}
+
+/**
+ * 进入视频全屏
+ */
+function enterVideoFullscreen() {
+    const video = videoDisplay;
+    if (!video || video.style.display === 'none') return;
+
+    if (video.requestFullscreen) {
+        video.requestFullscreen().catch(err => console.error('全屏失败:', err));
+    } else if (video.webkitRequestFullscreen) {
+        video.webkitRequestFullscreen();
+    } else if (video.webkitEnterFullscreen) {
+        // 兼容部分 Android / iOS WebView
+        video.webkitEnterFullscreen();
+    } else {
+        alert('当前环境不支持视频全屏');
+    }
+}
+
 // ==================== 媒体预览、大图与上下触碰切图/流式查看 ====================
 function previewMedia(keyLower, fileName, displayPath, isVideo) {
     if (currentFileKey && currentFileKey !== keyLower) {
@@ -1733,11 +1820,15 @@ function previewMedia(keyLower, fileName, displayPath, isVideo) {
     if (isVideo) {
         imgDisplay.style.display = 'none';
         btnZoomImg.style.display = 'none';
+        if (btnFullscreenVideo) btnFullscreenVideo.style.display = 'inline-flex';
         videoDisplay.style.display = 'block';
         videoDisplay.src = url;
+        // 生成封面
+        tryGenerateVideoPoster(videoDisplay);
     } else {
         videoDisplay.pause();
         videoDisplay.style.display = 'none';
+        if (btnFullscreenVideo) btnFullscreenVideo.style.display = 'none';
         imgDisplay.style.display = 'block';
         btnZoomImg.style.display = 'inline-flex';
         imgDisplay.src = url;
@@ -1891,6 +1982,13 @@ imgDisplay.addEventListener('click', (e) => {
 
 btnZoomImg.addEventListener('click', openImageModal);
 
+if (btnFullscreenVideo) {
+    btnFullscreenVideo.addEventListener('click', (e) => {
+        e.stopPropagation();
+        enterVideoFullscreen();
+    });
+}
+
 mediaViewer.addEventListener('click', (e) => {
     if (e.target.closest('button') || e.target.closest('.media-btn') || e.target.tagName === 'VIDEO' || e.target === imgDisplay) {
         return;
@@ -1962,6 +2060,12 @@ window.addEventListener('keydown', (e) => {
                      e.key === 'ArrowDown' || 
                      e.key === 'ArrowRight' || 
                      e.key === 'PageDown';
+
+    // ★ 关键：视频全屏时，音量键交给系统调节音量，不再拦截
+    if (isVideoInFullscreen() && (isUpKey || isDownKey)) {
+        // 不 preventDefault，让系统正常处理音量
+        return;
+    }
 
     if (isUpKey) {
         e.preventDefault();
