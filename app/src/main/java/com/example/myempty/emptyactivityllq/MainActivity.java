@@ -44,6 +44,8 @@ public class MainActivity extends AppCompatActivity {
     private WebChromeClient.CustomViewCallback customViewCallback;
     private int originalSystemUiVisibility;
     private FrameLayout fullscreenContainer;          // 全屏容器
+    /** 前端选择的全屏方向：landscape / portrait / auto */
+    private String preferredFsOrientation = "auto";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -112,6 +114,9 @@ public class MainActivity extends AppCompatActivity {
                 customView = view;
                 customViewCallback = callback;
 
+                // 按前端选择的方向进入全屏（横屏 / 竖屏 / 不强制）
+                applyPreferredOrientation();
+
                 // 隐藏系统状态栏 / 导航栏，进入沉浸式
                 originalSystemUiVisibility = getWindow().getDecorView().getSystemUiVisibility();
                 getWindow().getDecorView().setSystemUiVisibility(
@@ -130,7 +135,7 @@ public class MainActivity extends AppCompatActivity {
                         ViewGroup.LayoutParams.MATCH_PARENT);
                 ((FrameLayout) getWindow().getDecorView()).addView(customView, params);
 
-                // 可选：通知前端已进入真全屏
+                // 通知前端已进入真全屏
                 if (webView != null) {
                     webView.evaluateJavascript(
                             "window.__nativeVideoFullscreen = true;" +
@@ -149,6 +154,9 @@ public class MainActivity extends AppCompatActivity {
                 // 恢复系统 UI
                 getWindow().getDecorView().setSystemUiVisibility(originalSystemUiVisibility);
                 getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+
+                // 恢复自动方向
+                setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
 
                 // 移除全屏 View
                 ((FrameLayout) getWindow().getDecorView()).removeView(customView);
@@ -228,6 +236,16 @@ public class MainActivity extends AppCompatActivity {
             return true; // 拦截系统默认音量行为
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    /** 根据 preferredFsOrientation 设置 Activity 方向 */
+    private void applyPreferredOrientation() {
+        if ("landscape".equals(preferredFsOrientation)) {
+            setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        } else if ("portrait".equals(preferredFsOrientation)) {
+            setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
+        }
+        // auto：不强制改方向
     }
 
     private void requestStoragePermission() {
@@ -399,6 +417,29 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception e) {
                 return false;
             }
+        }
+
+        /**
+         * 前端选择全屏方向：landscape / portrait / auto
+         * 必须在 UI 线程改 orientation
+         */
+        @JavascriptInterface
+        public void setFullscreenOrientation(final String mode) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (mode == null || mode.isEmpty() || "auto".equals(mode)) {
+                        preferredFsOrientation = "auto";
+                        setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+                    } else if ("landscape".equals(mode)) {
+                        preferredFsOrientation = "landscape";
+                        setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                    } else if ("portrait".equals(mode)) {
+                        preferredFsOrientation = "portrait";
+                        setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
+                    }
+                }
+            });
         }
     }
 }

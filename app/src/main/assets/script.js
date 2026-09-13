@@ -36,7 +36,10 @@ const imgDisplay = document.getElementById('img-display');
 const videoDisplay = document.getElementById('video-display');
 const btnCopyTag = document.getElementById('btn-copy-tag');
 const btnZoomImg = document.getElementById('btn-zoom-img');
-const btnFullscreenVideo = document.getElementById('btn-fullscreen-video');
+const btnFullscreenLandscape = document.getElementById('btn-fullscreen-landscape');
+const btnFullscreenPortrait = document.getElementById('btn-fullscreen-portrait');
+/** 当前期望的全屏方向：'landscape' | 'portrait' | '' */
+let preferredFullscreenOrientation = '';
 
 const btnCopyNoteTag = document.getElementById('btn-copy-note-tag');
 
@@ -1702,11 +1705,21 @@ if (btnPaste) {
 /** 伪全屏状态（WebView 下 requestFullscreen 常失败，改用 CSS 伪全屏） */
 let isVideoPseudoFullscreen = false;
 
+/** 滑动快进状态 */
+let seekTouchStartX = 0;
+let seekTouchStartY = 0;
+let seekTouchStartTime = 0;
+let seekStartVideoTime = 0;
+let isSeekingByGesture = false;
+let seekIndicatorEl = null;
+let seekHideTimer = null;
+
 /**
  * 判断当前视频是否处于全屏状态（真全屏 或 伪全屏）
  */
 function isVideoInFullscreen() {
     if (isVideoPseudoFullscreen) return true;
+    if (window.__nativeVideoFullscreen) return true;
     const video = videoDisplay;
     if (!video) return false;
     return !!(
@@ -1714,6 +1727,149 @@ function isVideoInFullscreen() {
         document.webkitFullscreenElement === video ||
         video.webkitDisplayingFullscreen === true
     );
+}
+
+/**
+ * 确保存在快进提示层
+ */
+function ensureSeekIndicator() {
+    if (seekIndicatorEl) return seekIndicatorEl;
+    seekIndicatorEl = document.createElement('div');
+    seekIndicatorEl.id = 'video-seek-indicator';
+    seekIndicatorEl.innerHTML = '<span class="seek-icon"></span><span class="seek-text">0s</span>';
+    document.body.appendChild(seekIndicatorEl);
+    return seekIndicatorEl;
+}
+
+/**
+ * 显示快进/后退提示
+ */
+function showSeekIndicator(deltaSec) {
+    const el = ensureSeekIndicator();
+    const abs = Math.abs(deltaSec);
+    const sign = deltaSec >= 0 ? '+' : '-';
+    el.querySelector('.seek-icon').textContent = deltaSec >= 0 ? '⏩' : '⏪';
+    el.querySelector('.seek-text').textContent = `${sign}${abs.toFixed(0)}s`;
+    el.classList.add('visible');
+    el.classList.toggle('forward', deltaSec >= 0);
+    el.classList.toggle('backward', deltaSec < 0);
+
+    if (seekHideTimer) clearTimeout(seekHideTimer);
+    seekHideTimer = setTimeout(() => {
+        el.classList.remove('visible');
+    }, 800);
+}
+
+/**
+ * 对当前视频执行相对跳转
+ */
+function seekVideoBy(deltaSec) {
+    const video = videoDisplay;
+    if (!video || video.style.display === 'none') return;
+    if (!isFinite(video.duration) || video.duration <= 0) return;
+
+    let t = (video.currentTime || 0) + deltaSec;
+    t = Math.max(0, Math.min(video.duration - 0.1, t));
+    try {
+        video.currentTime = t;
+    } catch (e) {}
+    showSeekIndicator(deltaSec);
+}
+
+/**
+ * 绑定视频滑动快进 / 双击 ±10s（全屏或普通播放时都可用）
+ */
+function setupVideoSeekGestures() {
+    const target = mediaViewer || videoDisplay;
+    if (!target || target._seekGesturesBound) return;
+    target._seekGesturesBound = true;
+
+    const SWIPE_THRESHOLD = 40;      // 水平滑动超过多少像素开始判定为快进
+    const VERTICAL_LIMIT = 80;       // 垂直位移过大则认为是滚动，不触发快进
+    const DOUBLE_TAP_MS = 280;
+    let lastTapTime = 0;
+    let lastTapX = 0;
+
+    target.addEventListener('touchstart', (e) => {
+        if (!videoDisplay || videoDisplay.style.display === 'none') return;
+        if (e.touches.length !== 1) return;
+        // 点在控件按钮上时不处理
+        if (e.target.closest('button') || e.target.closest('.media-actions')) return;
+
+        const t = e.touches[0];
+        seekTouchStartX = t.clientX;
+        seekTouchStartY = t.clientY;
+        seekTouchStartTime = Date.now();
+        seekStartVideoTime = videoDisplay.currentTime || 0;
+        isSeekingByGesture = false;
+    }, { passive: true });
+
+    target.addEventListener('touchmove', (e) => {
+        if (!videoDisplay || videoDisplay.style.display === 'none') return;
+        if (e.touches.length !== 1) return;
+
+        const t = e.touches[0];
+        const dx = t.clientX - seekTouchStartX;
+        const dy = t.clientY - seekTouchStartY;
+
+        // 垂直滑动优先，避免和页面滚动冲突
+        if (Math.abs(dy) > VERTICAL_LIMIT && Math.abs(dy) > Math.abs(dx)) {
+            return;
+        }
+
+        if (Math.abs(dx) > SWIPE_THRESHOLD) {
+            isSeekingByGesture = true;
+            // 每 8 像素 ≈ 1 秒，最大一次滑动 ±120 秒
+            const deltaSec = Math.max(-120, Math.min(120, dx / 8));
+            const newTime = Math.max(0, Math.min(
+                (videoDisplay.duration || 0) - 0.1,
+                seekStartVideoTime + deltaSec
+            ));
+            try {
+                videoDisplay.currentTime = newTime;
+            } catch (err) {}
+            showSeekIndicator(deltaSec);
+
+            // 全屏时阻止默认，避免误触系统手势
+            if (isVideoInFullscreen() && e.cancelable) {
+                e.preventDefault();
+            }
+        }
+    }, { passive: false });
+
+    target.addEventListener('touchend', (e) => {
+        if (!videoDisplay || videoDisplay.style.display === 'none') return;
+
+        const now = Date.now();
+        const touch = e.changedTouches && e.changedTouches[0];
+        const x = touch ? touch.clientX : 0;
+
+        // 双击左右区域 ±10 秒（非滑动时）
+        if (!isSeekingByGesture && touch) {
+            if (now - lastTapTime < DOUBLE_TAP_MS && Math.abs(x - lastTapX) < 60) {
+                const rect = target.getBoundingClientRect();
+                const ratio = (x - rect.left) / rect.width;
+                if (ratio < 0.35) {
+                    seekVideoBy(-10);
+                } else if (ratio > 0.65) {
+                    seekVideoBy(10);
+                }
+                lastTapTime = 0;
+            } else {
+                lastTapTime = now;
+                lastTapX = x;
+            }
+        }
+
+        isSeekingByGesture = false;
+    }, { passive: true });
+}
+
+// 页面加载后绑定手势
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupVideoSeekGestures);
+} else {
+    setupVideoSeekGestures();
 }
 
 /**
@@ -1770,69 +1926,87 @@ function tryGenerateVideoPoster(videoEl) {
 }
 
 /**
- * 进入视频全屏（优先真全屏，失败则用可靠的 CSS 伪全屏）
+ * 通知原生设置全屏期望方向（landscape / portrait / auto）
  */
-function enterVideoFullscreen() {
+function setNativeFullscreenOrientation(mode) {
+    preferredFullscreenOrientation = mode || '';
+    try {
+        if (window.AndroidFS && typeof window.AndroidFS.setFullscreenOrientation === 'function') {
+            window.AndroidFS.setFullscreenOrientation(mode || 'auto');
+        }
+    } catch (e) {}
+    // 同时尝试 Web Orientation API（部分环境可用）
+    try {
+        if (mode === 'landscape' && screen.orientation && screen.orientation.lock) {
+            screen.orientation.lock('landscape').catch(() => {});
+        } else if (mode === 'portrait' && screen.orientation && screen.orientation.lock) {
+            screen.orientation.lock('portrait').catch(() => {});
+        } else if (screen.orientation && screen.orientation.unlock) {
+            screen.orientation.unlock();
+        }
+    } catch (e) {}
+}
+
+/**
+ * 进入视频全屏
+ * @param {'landscape'|'portrait'} orientation 用户选择的方向
+ */
+function enterVideoFullscreen(orientation) {
     const video = videoDisplay;
     if (!video || video.style.display === 'none') return;
 
+    const mode = orientation === 'portrait' ? 'portrait' : 'landscape';
+    setNativeFullscreenOrientation(mode);
+
     // 1. 先尝试系统 Fullscreen API
-    let triedNative = false;
     const tryNative = () => {
         if (video.requestFullscreen) {
-            triedNative = true;
             return video.requestFullscreen().then(() => {
                 // 成功进入真全屏
             }).catch(() => {
-                // 失败 → 走伪全屏
-                enterPseudoFullscreen();
+                enterPseudoFullscreen(mode);
             });
         } else if (video.webkitRequestFullscreen) {
-            triedNative = true;
             video.webkitRequestFullscreen();
-            // 部分 WebView 无 Promise，延迟检测
             setTimeout(() => {
-                if (!isVideoInFullscreen()) enterPseudoFullscreen();
+                if (!isVideoInFullscreen()) enterPseudoFullscreen(mode);
             }, 300);
             return;
         } else if (video.webkitEnterFullscreen) {
-            triedNative = true;
             try {
                 video.webkitEnterFullscreen();
             } catch (e) {
-                enterPseudoFullscreen();
+                enterPseudoFullscreen(mode);
             }
             return;
         }
-        // 没有任何原生支持 → 直接伪全屏
-        enterPseudoFullscreen();
+        enterPseudoFullscreen(mode);
     };
 
     tryNative();
 }
 
 /**
- * 可靠的 CSS 伪全屏（适配 Android WebView）
+ * 可靠的 CSS 伪全屏
+ * @param {'landscape'|'portrait'} [mode]
  */
-function enterPseudoFullscreen() {
+function enterPseudoFullscreen(mode) {
     if (isVideoPseudoFullscreen) return;
     isVideoPseudoFullscreen = true;
+    if (mode) preferredFullscreenOrientation = mode;
 
     document.body.classList.add('video-pseudo-fs');
     if (mediaViewer) mediaViewer.classList.add('video-pseudo-fs');
     if (videoDisplay) {
         videoDisplay.classList.add('video-pseudo-fs');
-        // 尽量让视频占满并保持比例
         videoDisplay.style.objectFit = 'contain';
     }
 
-    // 更新按钮文字，方便退出
-    if (btnFullscreenVideo) {
-        btnFullscreenVideo.textContent = '⛶ 退出全屏';
-        btnFullscreenVideo.style.display = 'inline-flex';
-    }
+    updateFullscreenButtonsUI(true);
 
-    // 尝试让视频自动播放（部分机型需要）
+    // 尝试锁定方向
+    setNativeFullscreenOrientation(preferredFullscreenOrientation || mode || 'landscape');
+
     try {
         if (videoDisplay.paused) videoDisplay.play().catch(() => {});
     } catch (e) {}
@@ -1852,26 +2026,58 @@ function exitPseudoFullscreen() {
         videoDisplay.style.objectFit = '';
     }
 
-    if (btnFullscreenVideo) {
-        btnFullscreenVideo.textContent = '⛶ 全屏';
+    updateFullscreenButtonsUI(false);
+    setNativeFullscreenOrientation('auto');
+    preferredFullscreenOrientation = '';
+}
+
+/**
+ * 更新全屏按钮显示文案
+ */
+function updateFullscreenButtonsUI(inFullscreen) {
+    if (inFullscreen) {
+        // 全屏中：两个按钮都显示为「退出全屏」，点任意一个即可退出
+        if (btnFullscreenLandscape) {
+            btnFullscreenLandscape.textContent = '⛶ 退出全屏';
+            btnFullscreenLandscape.style.display = 'inline-flex';
+        }
+        if (btnFullscreenPortrait) {
+            btnFullscreenPortrait.textContent = '⛶ 退出全屏';
+            btnFullscreenPortrait.style.display = 'inline-flex';
+        }
+    } else {
+        if (btnFullscreenLandscape) {
+            btnFullscreenLandscape.textContent = '⛶ 横屏全屏';
+        }
+        if (btnFullscreenPortrait) {
+            btnFullscreenPortrait.textContent = '⛶ 竖屏全屏';
+        }
     }
 }
 
 /**
- * 切换全屏（按钮点击用）
+ * 退出任意全屏
  */
-function toggleVideoFullscreen() {
+function exitAnyFullscreen() {
+    if (isVideoPseudoFullscreen) {
+        exitPseudoFullscreen();
+    } else if (document.fullscreenElement || document.webkitFullscreenElement) {
+        if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        setNativeFullscreenOrientation('auto');
+        preferredFullscreenOrientation = '';
+        updateFullscreenButtonsUI(false);
+    }
+}
+
+/**
+ * 点击横屏/竖屏按钮
+ */
+function onFullscreenButtonClick(orientation) {
     if (isVideoInFullscreen()) {
-        // 退出
-        if (isVideoPseudoFullscreen) {
-            exitPseudoFullscreen();
-        } else {
-            // 真全屏
-            if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
-            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-        }
+        exitAnyFullscreen();
     } else {
-        enterVideoFullscreen();
+        enterVideoFullscreen(orientation);
     }
 }
 
@@ -1914,7 +2120,9 @@ function previewMedia(keyLower, fileName, displayPath, isVideo) {
     if (isVideo) {
         imgDisplay.style.display = 'none';
         btnZoomImg.style.display = 'none';
-        if (btnFullscreenVideo) btnFullscreenVideo.style.display = 'inline-flex';
+        if (btnFullscreenLandscape) btnFullscreenLandscape.style.display = 'inline-flex';
+        if (btnFullscreenPortrait) btnFullscreenPortrait.style.display = 'inline-flex';
+        updateFullscreenButtonsUI(false);
         videoDisplay.style.display = 'block';
         videoDisplay.src = url;
         // 生成封面
@@ -1924,7 +2132,8 @@ function previewMedia(keyLower, fileName, displayPath, isVideo) {
         if (isVideoPseudoFullscreen) exitPseudoFullscreen();
         videoDisplay.pause();
         videoDisplay.style.display = 'none';
-        if (btnFullscreenVideo) btnFullscreenVideo.style.display = 'none';
+        if (btnFullscreenLandscape) btnFullscreenLandscape.style.display = 'none';
+        if (btnFullscreenPortrait) btnFullscreenPortrait.style.display = 'none';
         imgDisplay.style.display = 'block';
         btnZoomImg.style.display = 'inline-flex';
         imgDisplay.src = url;
@@ -2078,25 +2287,39 @@ imgDisplay.addEventListener('click', (e) => {
 
 btnZoomImg.addEventListener('click', openImageModal);
 
-if (btnFullscreenVideo) {
-    btnFullscreenVideo.addEventListener('click', (e) => {
+if (btnFullscreenLandscape) {
+    btnFullscreenLandscape.addEventListener('click', (e) => {
         e.stopPropagation();
-        toggleVideoFullscreen();
+        onFullscreenButtonClick('landscape');
+    });
+}
+if (btnFullscreenPortrait) {
+    btnFullscreenPortrait.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onFullscreenButtonClick('portrait');
     });
 }
 
 // 真全屏退出时同步状态
-document.addEventListener('fullscreenchange', () => {
-    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-        // 真全屏已退出
-        if (btnFullscreenVideo) btnFullscreenVideo.textContent = '⛶ 全屏';
+function syncFullscreenExitUI() {
+    if (!document.fullscreenElement && !document.webkitFullscreenElement && !isVideoPseudoFullscreen) {
+        preferredFullscreenOrientation = '';
+        setNativeFullscreenOrientation('auto');
+        updateFullscreenButtonsUI(false);
     }
-});
-document.addEventListener('webkitfullscreenchange', () => {
-    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-        if (btnFullscreenVideo) btnFullscreenVideo.textContent = '⛶ 全屏';
+}
+document.addEventListener('fullscreenchange', syncFullscreenExitUI);
+document.addEventListener('webkitfullscreenchange', syncFullscreenExitUI);
+
+// 原生真全屏回调（MainActivity 里 evaluateJavascript）
+window.onNativeVideoFullscreen = function (entering) {
+    if (entering) {
+        updateFullscreenButtonsUI(true);
+    } else {
+        preferredFullscreenOrientation = '';
+        updateFullscreenButtonsUI(false);
     }
-});
+};
 
 
 mediaViewer.addEventListener('click', (e) => {
