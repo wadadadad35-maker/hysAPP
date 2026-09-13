@@ -968,6 +968,9 @@ function restoreMediaByKey(keyLower, state) {
 }
 
 function loadMdContent(keyLower) {
+    // 离开视频时退出伪全屏
+    if (isVideoPseudoFullscreen) exitPseudoFullscreen();
+
     if (currentFileKey && currentFileKey !== keyLower) {
         // 切换文件前先取消防抖并立即把旧文件落盘，避免粘贴后立刻切换导致内容丢失。
         flushCurrentFileBeforeLeave();
@@ -1696,10 +1699,14 @@ if (btnPaste) {
 }
 
 // ==================== 视频全屏与封面辅助函数 ====================
+/** 伪全屏状态（WebView 下 requestFullscreen 常失败，改用 CSS 伪全屏） */
+let isVideoPseudoFullscreen = false;
+
 /**
- * 判断当前视频是否处于全屏状态
+ * 判断当前视频是否处于全屏状态（真全屏 或 伪全屏）
  */
 function isVideoInFullscreen() {
+    if (isVideoPseudoFullscreen) return true;
     const video = videoDisplay;
     if (!video) return false;
     return !!(
@@ -1763,21 +1770,108 @@ function tryGenerateVideoPoster(videoEl) {
 }
 
 /**
- * 进入视频全屏
+ * 进入视频全屏（优先真全屏，失败则用可靠的 CSS 伪全屏）
  */
 function enterVideoFullscreen() {
     const video = videoDisplay;
     if (!video || video.style.display === 'none') return;
 
-    if (video.requestFullscreen) {
-        video.requestFullscreen().catch(err => console.error('全屏失败:', err));
-    } else if (video.webkitRequestFullscreen) {
-        video.webkitRequestFullscreen();
-    } else if (video.webkitEnterFullscreen) {
-        // 兼容部分 Android / iOS WebView
-        video.webkitEnterFullscreen();
+    // 1. 先尝试系统 Fullscreen API
+    let triedNative = false;
+    const tryNative = () => {
+        if (video.requestFullscreen) {
+            triedNative = true;
+            return video.requestFullscreen().then(() => {
+                // 成功进入真全屏
+            }).catch(() => {
+                // 失败 → 走伪全屏
+                enterPseudoFullscreen();
+            });
+        } else if (video.webkitRequestFullscreen) {
+            triedNative = true;
+            video.webkitRequestFullscreen();
+            // 部分 WebView 无 Promise，延迟检测
+            setTimeout(() => {
+                if (!isVideoInFullscreen()) enterPseudoFullscreen();
+            }, 300);
+            return;
+        } else if (video.webkitEnterFullscreen) {
+            triedNative = true;
+            try {
+                video.webkitEnterFullscreen();
+            } catch (e) {
+                enterPseudoFullscreen();
+            }
+            return;
+        }
+        // 没有任何原生支持 → 直接伪全屏
+        enterPseudoFullscreen();
+    };
+
+    tryNative();
+}
+
+/**
+ * 可靠的 CSS 伪全屏（适配 Android WebView）
+ */
+function enterPseudoFullscreen() {
+    if (isVideoPseudoFullscreen) return;
+    isVideoPseudoFullscreen = true;
+
+    document.body.classList.add('video-pseudo-fs');
+    if (mediaViewer) mediaViewer.classList.add('video-pseudo-fs');
+    if (videoDisplay) {
+        videoDisplay.classList.add('video-pseudo-fs');
+        // 尽量让视频占满并保持比例
+        videoDisplay.style.objectFit = 'contain';
+    }
+
+    // 更新按钮文字，方便退出
+    if (btnFullscreenVideo) {
+        btnFullscreenVideo.textContent = '⛶ 退出全屏';
+        btnFullscreenVideo.style.display = 'inline-flex';
+    }
+
+    // 尝试让视频自动播放（部分机型需要）
+    try {
+        if (videoDisplay.paused) videoDisplay.play().catch(() => {});
+    } catch (e) {}
+}
+
+/**
+ * 退出伪全屏
+ */
+function exitPseudoFullscreen() {
+    if (!isVideoPseudoFullscreen) return;
+    isVideoPseudoFullscreen = false;
+
+    document.body.classList.remove('video-pseudo-fs');
+    if (mediaViewer) mediaViewer.classList.remove('video-pseudo-fs');
+    if (videoDisplay) {
+        videoDisplay.classList.remove('video-pseudo-fs');
+        videoDisplay.style.objectFit = '';
+    }
+
+    if (btnFullscreenVideo) {
+        btnFullscreenVideo.textContent = '⛶ 全屏';
+    }
+}
+
+/**
+ * 切换全屏（按钮点击用）
+ */
+function toggleVideoFullscreen() {
+    if (isVideoInFullscreen()) {
+        // 退出
+        if (isVideoPseudoFullscreen) {
+            exitPseudoFullscreen();
+        } else {
+            // 真全屏
+            if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        }
     } else {
-        alert('当前环境不支持视频全屏');
+        enterVideoFullscreen();
     }
 }
 
@@ -1826,6 +1920,8 @@ function previewMedia(keyLower, fileName, displayPath, isVideo) {
         // 生成封面
         tryGenerateVideoPoster(videoDisplay);
     } else {
+        // 切到图片时退出伪全屏
+        if (isVideoPseudoFullscreen) exitPseudoFullscreen();
         videoDisplay.pause();
         videoDisplay.style.display = 'none';
         if (btnFullscreenVideo) btnFullscreenVideo.style.display = 'none';
@@ -1985,14 +2081,31 @@ btnZoomImg.addEventListener('click', openImageModal);
 if (btnFullscreenVideo) {
     btnFullscreenVideo.addEventListener('click', (e) => {
         e.stopPropagation();
-        enterVideoFullscreen();
+        toggleVideoFullscreen();
     });
 }
+
+// 真全屏退出时同步状态
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        // 真全屏已退出
+        if (btnFullscreenVideo) btnFullscreenVideo.textContent = '⛶ 全屏';
+    }
+});
+document.addEventListener('webkitfullscreenchange', () => {
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        if (btnFullscreenVideo) btnFullscreenVideo.textContent = '⛶ 全屏';
+    }
+});
+
 
 mediaViewer.addEventListener('click', (e) => {
     if (e.target.closest('button') || e.target.closest('.media-btn') || e.target.tagName === 'VIDEO' || e.target === imgDisplay) {
         return;
     }
+
+    // 全屏时不响应上下触碰切图，避免误触
+    if (isVideoInFullscreen()) return;
 
     const rect = mediaViewer.getBoundingClientRect();
     const clickRatio = (e.clientY - rect.top) / rect.height;

@@ -7,13 +7,17 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
 import android.util.Base64;
-import android.view.KeyEvent; // 🔑 新增按键事件 import
+import android.view.KeyEvent;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -35,12 +39,23 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILECHOOSER_RESULTCODE = 1;
 
+    // ========== 视频全屏相关 ==========
+    private View customView;                          // 全屏时系统给的 View
+    private WebChromeClient.CustomViewCallback customViewCallback;
+    private int originalSystemUiVisibility;
+    private FrameLayout fullscreenContainer;          // 全屏容器
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // 根布局：普通时只放 WebView，全屏时再叠一层
+        FrameLayout root = new FrameLayout(this);
         webView = new WebView(this);
-        setContentView(webView);
+        root.addView(webView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        setContentView(root);
 
         requestStoragePermission();
 
@@ -51,13 +66,21 @@ public class MainActivity extends AppCompatActivity {
         settings.setAllowContentAccess(true);
         settings.setAllowFileAccessFromFileURLs(true);
         settings.setAllowUniversalAccessFromFileURLs(true);
+        // 允许视频自动播放（减少手势限制）
+        settings.setMediaPlaybackRequiresUserGesture(false);
+        // 硬件加速对视频全屏很重要
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        }
 
         webView.setWebViewClient(new WebViewClient());
 
-        // 🔑 绑定 JSBridge 原生文件读写接口对象
+        // 绑定 JSBridge
         webView.addJavascriptInterface(new AndroidFS(), "AndroidFS");
 
+        // ========== 关键：完整 WebChromeClient，支持视频全屏 ==========
         webView.setWebChromeClient(new WebChromeClient() {
+
             @Override
             public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
                 if (uploadMessage != null) {
@@ -74,9 +97,79 @@ public class MainActivity extends AppCompatActivity {
                 }
                 return true;
             }
+
+            /**
+             * HTML5 视频进入全屏时系统会回调这里
+             */
+            @Override
+            public void onShowCustomView(View view, CustomViewCallback callback) {
+                // 已经有全屏视图则先关掉
+                if (customView != null) {
+                    onHideCustomView();
+                    return;
+                }
+
+                customView = view;
+                customViewCallback = callback;
+
+                // 隐藏系统状态栏 / 导航栏，进入沉浸式
+                originalSystemUiVisibility = getWindow().getDecorView().getSystemUiVisibility();
+                getWindow().getDecorView().setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_FULLSCREEN
+                                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                );
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+
+                // 把全屏 View 加到最上层
+                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT);
+                ((FrameLayout) getWindow().getDecorView()).addView(customView, params);
+
+                // 可选：通知前端已进入真全屏
+                if (webView != null) {
+                    webView.evaluateJavascript(
+                            "window.__nativeVideoFullscreen = true;" +
+                            "if(typeof window.onNativeVideoFullscreen==='function')window.onNativeVideoFullscreen(true);",
+                            null);
+                }
+            }
+
+            /**
+             * 退出全屏
+             */
+            @Override
+            public void onHideCustomView() {
+                if (customView == null) return;
+
+                // 恢复系统 UI
+                getWindow().getDecorView().setSystemUiVisibility(originalSystemUiVisibility);
+                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+
+                // 移除全屏 View
+                ((FrameLayout) getWindow().getDecorView()).removeView(customView);
+                customView = null;
+
+                if (customViewCallback != null) {
+                    customViewCallback.onCustomViewHidden();
+                    customViewCallback = null;
+                }
+
+                // 通知前端已退出真全屏
+                if (webView != null) {
+                    webView.evaluateJavascript(
+                            "window.__nativeVideoFullscreen = false;" +
+                            "if(typeof window.onNativeVideoFullscreen==='function')window.onNativeVideoFullscreen(false);",
+                            null);
+                }
+            }
         });
 
-        // 🔑 只有全新启动时加载 URL，避免销毁重建或恢复时强制刷新页面
+        // 只有全新启动时加载 URL
         if (savedInstanceState == null) {
             webView.loadUrl("file:///android_asset/index.html");
         } else {
@@ -84,7 +177,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 🔑 保存 WebView 内部状态
     @Override
     protected void onSaveInstanceState(@NonNull Bundle outState) {
         super.onSaveInstanceState(outState);
@@ -93,29 +185,47 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 🔑 重写返回键：页面不能后退时直接切入后台（不销毁 Activity）
+    /**
+     * 返回键：优先退出视频全屏，其次 WebView 后退，最后移到后台
+     */
     @Override
     public void onBackPressed() {
+        // 1. 如果正在视频全屏，先退出全屏
+        if (customView != null) {
+            webView.getWebChromeClient().onHideCustomView();
+            return;
+        }
+        // 2. WebView 可后退
         if (webView != null && webView.canGoBack()) {
             webView.goBack();
         } else {
-            // 将当前 Task 移到后台，保持 Activity 存活
             moveTaskToBack(true);
         }
     }
 
-    // 🔑【新增】重写物理按键监听：拦截物理音量键并派发给 WebView 内的 JavaScript 触发翻页
+    /**
+     * 音量键逻辑：
+     * - 视频处于【真全屏】时 → 不拦截，让系统正常调音量
+     * - 其它情况（看图/普通媒体）→ 拦截并转发给 JS 做上下翻页
+     */
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+
+            // ★ 真全屏时放行，让系统调音量
+            if (customView != null) {
+                return super.onKeyDown(keyCode, event);
+            }
+
+            // 非全屏：转发给前端做翻页
             String keyName = (keyCode == KeyEvent.KEYCODE_VOLUME_UP) ? "AudioVolumeUp" : "AudioVolumeDown";
             if (webView != null) {
                 webView.evaluateJavascript(
-                    "window.dispatchEvent(new KeyboardEvent('keydown', {key: '" + keyName + "', keyCode: " + keyCode + "}));", 
-                    null
+                        "window.dispatchEvent(new KeyboardEvent('keydown', {key: '" + keyName + "', keyCode: " + keyCode + "}));",
+                        null
                 );
             }
-            return true; // 返回 true 拦截系统默认调节音量的行为
+            return true; // 拦截系统默认音量行为
         }
         return super.onKeyDown(keyCode, event);
     }
@@ -143,7 +253,6 @@ public class MainActivity extends AppCompatActivity {
     // ==================== JSBridge 原生文件系统接口类 ====================
     public class AndroidFS {
 
-        // 递归扫描指定目录
         @JavascriptInterface
         public String scanDirectory(String dirPath) {
             JSONArray result = new JSONArray();
@@ -176,7 +285,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 读取绝对路径文本内容（适用于 .md, .txt, .json 等）
         @JavascriptInterface
         public String readFile(String fullPath) {
             try {
@@ -186,7 +294,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 写回绝对路径文本文件
         @JavascriptInterface
         public boolean writeFile(String fullPath, String content) {
             try {
@@ -201,7 +308,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // ✨【新增】写回 Base64 格式的二进制文件（用于图片、音频、压缩包等）
         @JavascriptInterface
         public boolean writeBase64File(String fullPath, String base64Data) {
             try {
@@ -209,7 +315,6 @@ public class MainActivity extends AppCompatActivity {
                 if (file.getParentFile() != null && !file.getParentFile().exists()) {
                     file.getParentFile().mkdirs();
                 }
-                // 去除可能存在的 DataURL 头 (例如 data:image/webp;base64,)
                 if (base64Data != null && base64Data.contains(",")) {
                     base64Data = base64Data.split(",")[1];
                 }
@@ -222,7 +327,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // ✨【新增】本地复制文件接口（便于导入外部存储路径的文件）
         @JavascriptInterface
         public boolean copyFile(String srcPath, String destPath) {
             try {
@@ -247,7 +351,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 删除文件或文件夹
         @JavascriptInterface
         public boolean deleteFileOrFolder(String fullPath) {
             try {
@@ -271,7 +374,6 @@ public class MainActivity extends AppCompatActivity {
             return fileOrDir.delete();
         }
 
-        // 重命名或移动路径
         @JavascriptInterface
         public boolean renameFileOrFolder(String oldPath, String newPath) {
             try {
@@ -286,7 +388,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 新建文件夹
         @JavascriptInterface
         public boolean createFolder(String fullPath) {
             try {
