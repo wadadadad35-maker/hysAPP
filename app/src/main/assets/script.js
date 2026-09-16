@@ -1503,10 +1503,16 @@ btnDeleteFile.addEventListener('click', () => {
     syncCurrentContent();
 
     if (mediaViewer && mediaViewer.style.display !== 'none' && activeMediaPath) {
-        const keyLower = activeMediaPath.toLowerCase();
-        const fullPath = currentRootFolderPath + '/' + activeMediaPath;
+        const deletedPath = activeMediaPath;
+        const keyLower = deletedPath.toLowerCase();
+        const fullPath = currentRootFolderPath + '/' + deletedPath;
 
-        if (!confirm(`确定要彻底删除媒体文件 "${activeMediaPath}" 吗？`)) return;
+        if (!confirm(`确定要彻底删除媒体文件 "${deletedPath}" 吗？`)) return;
+
+        // 记下父文件夹，删除后展开回去（文件已不存在，不能再打开文件）
+        const parentFolder = deletedPath.includes('/')
+            ? deletedPath.substring(0, deletedPath.lastIndexOf('/'))
+            : '';
 
         if (window.AndroidFS) {
             window.AndroidFS.deleteFileOrFolder(fullPath);
@@ -1514,13 +1520,24 @@ btnDeleteFile.addEventListener('click', () => {
 
         mediaUrlsMap.delete(keyLower);
         mediaPathsMap.delete(keyLower);
-        deletePathFromTree(mediaTree, activeMediaPath);
+        deletePathFromTree(mediaTree, deletedPath);
 
         activeMediaPath = '';
         mediaViewer.style.display = 'none';
         fileTitle.textContent = '未选择文件';
+        currentFolderPath = parentFolder;
 
         refreshTrees();
+        if (bottomSheet && !bottomSheet.classList.contains('active')) {
+            bottomSheet.classList.add('active');
+            if (drawerOverlay) drawerOverlay.classList.add('active');
+        }
+        setTimeout(() => {
+            if (parentFolder) {
+                expandAndHighlightFolder(parentFolder, mediaList);
+                expandAndHighlightFolder(parentFolder, mdList);
+            }
+        }, 80);
         alert('媒体文件已删除！');
         return;
     }
@@ -1532,6 +1549,12 @@ btnDeleteFile.addEventListener('click', () => {
 
     const item = fileDataMap.get(currentFileKey);
     if (!confirm(`确定要彻底删除本地文件 "${item.path}" 吗？`)) return;
+
+    // 记下父文件夹，删除后展开回去
+    const deletedRel = item.path || '';
+    const parentFolder = deletedRel.includes('/')
+        ? deletedRel.substring(0, deletedRel.lastIndexOf('/'))
+        : '';
 
     if (window.AndroidFS && item.fullPath) {
         window.AndroidFS.deleteFileOrFolder(item.fullPath);
@@ -1545,12 +1568,25 @@ btnDeleteFile.addEventListener('click', () => {
     } catch (e) {}
 
     currentFileKey = '';
+    currentFolderPath = parentFolder;
     editor.value = '';
     editor.setAttribute('readonly', 'true');
     preview.innerHTML = '';
-    fileTitle.textContent = '未选择文件';
+    fileTitle.textContent = parentFolder
+        ? `已删除，当前目录：${parentFolder}`
+        : '未选择文件';
 
     refreshTrees();
+    if (bottomSheet && !bottomSheet.classList.contains('active')) {
+        bottomSheet.classList.add('active');
+        if (drawerOverlay) drawerOverlay.classList.add('active');
+    }
+    setTimeout(() => {
+        if (parentFolder) {
+            expandAndHighlightFolder(parentFolder, mdList);
+            expandAndHighlightFolder(parentFolder, mediaList);
+        }
+    }, 80);
 });
 
 btnDeleteFolder.addEventListener('click', () => {
@@ -1561,15 +1597,34 @@ btnDeleteFolder.addEventListener('click', () => {
 
     if (!confirm(`确定要彻底删除文件夹 "${currentFolderPath}" 及其包含的所有内容吗？`)) return;
 
-    const fullPath = currentRootFolderPath + '/' + currentFolderPath;
+    const deletedFolder = currentFolderPath;
+    const parentFolder = deletedFolder.includes('/')
+        ? deletedFolder.substring(0, deletedFolder.lastIndexOf('/'))
+        : '';
+    const fullPath = currentRootFolderPath + '/' + deletedFolder;
 
     if (window.AndroidFS) {
         window.AndroidFS.deleteFileOrFolder(fullPath);
     }
 
-    alert('文件夹已删除！');
-    currentFolderPath = '';
+    currentFolderPath = parentFolder;
     rescanDirectorySilently();
+    refreshTrees();
+
+    if (bottomSheet && !bottomSheet.classList.contains('active')) {
+        bottomSheet.classList.add('active');
+        if (drawerOverlay) drawerOverlay.classList.add('active');
+    }
+    setTimeout(() => {
+        if (parentFolder) {
+            expandAndHighlightFolder(parentFolder, mdList);
+            expandAndHighlightFolder(parentFolder, mediaList);
+        }
+    }, 80);
+
+    alert(parentFolder
+        ? `文件夹已删除！已回到上级：${parentFolder}`
+        : '文件夹已删除！');
 });
 
 // ==================== 上次进度跳转（只恢复该文件夹的图片/媒体） ====================
