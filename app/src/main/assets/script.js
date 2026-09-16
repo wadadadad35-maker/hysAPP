@@ -767,9 +767,6 @@ function showPathModal() {
     }
     if (customPathModal) {
         customPathModal.classList.add('active');
-        setTimeout(() => {
-            if (modalPathInput) modalPathInput.focus();
-        }, 100);
     }
 }
 
