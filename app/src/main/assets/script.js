@@ -187,6 +187,8 @@ function saveFolderViewState() {
             previewScrollTop: preview ? preview.scrollTop : 0,
             videoCurrentTime: (isViewingMedia && videoDisplay) ? videoDisplay.currentTime : 0,
             isMedia: isViewingMedia,
+            // 记住当前选中的文件夹；如果当前打开的是文件/媒体，则记录其所属文件夹
+            selectedFolderPath: currentFolderPath || (isViewingMedia ? getCurrentMediaFolderPath() : (currentFileKey ? currentFileKey.split('/').slice(0, -1).join('/') : '')),
             updatedAt: Date.now()
         };
         states[rootKey + '::__last__'] = lastState;
@@ -708,9 +710,13 @@ function setupTreeDelegation(containerEl) {
             if (li && li.dataset.folderPath) {
                 currentFolderPath = li.dataset.folderPath;
                 currentFileKey = '';
+                activeMediaPath = '';
                 document.querySelectorAll('.tree-file').forEach(el => el.classList.remove('active'));
                 document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('active'));
                 folderHeader.classList.add('active');
+
+                // 点击文件夹后立即保存选中状态，避免刷新/切换后回到根目录
+                saveFolderViewState();
             }
 
             if (li && li._ensureRendered) {
@@ -942,14 +948,43 @@ function restoreFolderViewState(rootPath, folderPath) {
         }
     }
 
+    // 没有具体文件/媒体时，也恢复上次单纯选中的文件夹
+    const selectedFolderPath = state.selectedFolderPath || '';
+    if (!targetKey && selectedFolderPath) {
+        let restored = false;
+        restored = expandAndHighlightFolder(selectedFolderPath, mdList) || restored;
+        restored = expandAndHighlightFolder(selectedFolderPath, mediaList) || restored;
+        if (restored) {
+            currentFolderPath = selectedFolderPath;
+            currentFileKey = '';
+            activeMediaPath = '';
+            fileTitle.textContent = selectedFolderPath || rootPath;
+            return true;
+        }
+    }
+
     if (!targetKey) return false;
 
     if (isMedia) {
-        return restoreMediaByKey(targetKey, state);
+        const restored = restoreMediaByKey(targetKey, state);
+        if (restored) {
+            const folderPath = selectedFolderPath || getCurrentMediaFolderPath();
+            if (folderPath) {
+                expandAndHighlightFolder(folderPath, mediaList);
+                expandAndHighlightFolder(folderPath, mdList);
+            }
+        }
+        return restored;
     }
 
     // 恢复文章 + 滚动位置
     loadMdContent(targetKey);
+
+    const articleFolderPath = selectedFolderPath || targetKey.split('/').slice(0, -1).join('/');
+    if (articleFolderPath) {
+        expandAndHighlightFolder(articleFolderPath, mdList);
+        expandAndHighlightFolder(articleFolderPath, mediaList);
+    }
 
     if (state.mode === 'preview') {
         currentMode = 'preview';
