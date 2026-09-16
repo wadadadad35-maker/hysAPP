@@ -822,7 +822,27 @@ function executeFolderScan(inputPath, isSilent = false) {
     }
 }
 
-btnTriggerFolder.addEventListener('click', showPathModal);
+// 优先使用系统文件夹选择器；失败或不可用时再弹出路径输入框
+btnTriggerFolder.addEventListener('click', () => {
+    if (typeof window.AndroidFS !== 'undefined' && typeof window.AndroidFS.pickFolder === 'function') {
+        // 同时保留手动输入作为备选：长按或点「手动输入路径」仍可用
+        try {
+            window.AndroidFS.pickFolder();
+            return;
+        } catch (e) {
+            console.warn('pickFolder 调用失败，回退到路径输入', e);
+        }
+    }
+    showPathModal();
+});
+
+/** 原生文件夹选择器回调（由 MainActivity 注入） */
+window.onFolderPicked = function (path) {
+    if (!path) return;
+    hidePathModal();
+    executeFolderScan(path);
+};
+
 
 if (btnShowRecent) {
     btnShowRecent.addEventListener('click', () => {
@@ -845,6 +865,24 @@ if (btnModalConfirm) {
         const val = modalPathInput ? modalPathInput.value : '';
         hidePathModal();
         executeFolderScan(val);
+    });
+}
+
+const btnModalPickSystem = document.getElementById('btn-modal-pick-system');
+if (btnModalPickSystem) {
+    btnModalPickSystem.addEventListener('click', () => {
+        hidePathModal();
+        if (typeof window.AndroidFS !== 'undefined' && typeof window.AndroidFS.pickFolder === 'function') {
+            try {
+                window.AndroidFS.pickFolder();
+            } catch (e) {
+                alert('无法打开系统文件夹选择器，请手动输入路径。');
+                showPathModal();
+            }
+        } else {
+            alert('当前环境不支持系统文件夹选择器，请手动输入路径。');
+            showPathModal();
+        }
     });
 }
 
@@ -1177,8 +1215,61 @@ btnCreateFolder.addEventListener('click', () => {
     }
 
     insertFolderToTree(mdTree, folderPath);
+    // 同步插入媒体树，避免两边目录不一致
+    insertFolderToTree(mediaTree, folderPath);
     refreshTrees();
+    // 选中并展开新建的文件夹，免去用户再去目录里找
+    currentFolderPath = folderPath;
+    document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('active'));
+    expandAndHighlightFolder(folderPath, mdList);
+    expandAndHighlightFolder(folderPath, mediaList);
 });
+
+/**
+ * 展开并高亮某个文件夹节点（不打开文件）
+ */
+function expandAndHighlightFolder(folderRelativePath, containerEl) {
+    if (!folderRelativePath || !containerEl) return;
+    const normalized = folderRelativePath.replace(/\\/g, '/').toLowerCase();
+    const parts = normalized.split('/').filter(Boolean);
+
+    let currentUl = containerEl.querySelector(':scope > ul.tree-node');
+    if (!currentUl) return;
+
+    let targetHeader = null;
+    for (let i = 0; i < parts.length; i++) {
+        const folderName = parts[i];
+        const folderLis = currentUl.querySelectorAll(':scope > li.tree-folder');
+        let matchedFolderLi = null;
+        for (const li of folderLis) {
+            if (li.dataset.folderName === folderName) {
+                matchedFolderLi = li;
+                break;
+            }
+        }
+        if (!matchedFolderLi) break;
+
+        matchedFolderLi.style.display = 'block';
+        const childrenUl = matchedFolderLi._ensureRendered
+            ? matchedFolderLi._ensureRendered()
+            : matchedFolderLi.querySelector(':scope > ul');
+        if (childrenUl) {
+            childrenUl.style.display = 'block';
+            const arrow = matchedFolderLi.querySelector(':scope > .folder-header .arrow');
+            if (arrow) arrow.textContent = '▼';
+            currentUl = childrenUl;
+        }
+        if (i === parts.length - 1) {
+            targetHeader = matchedFolderLi.querySelector(':scope > .folder-header');
+        }
+    }
+    if (targetHeader) {
+        targetHeader.classList.add('active');
+        setTimeout(() => {
+            targetHeader.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }, 80);
+    }
+}
 
 // ==================== 导入外部文件/图片/笔记 ====================
 if (btnImportFile && importFileInput) {
@@ -1196,24 +1287,28 @@ if (btnImportFile && importFileInput) {
 
         const targetFolder = currentFolderPath ? currentFolderPath : '';
         let successCount = 0;
+        // 记录本次成功导入的条目，用于增量更新并自动打开
+        const importedItems = [];
 
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             const targetRelativePath = targetFolder ? `${targetFolder}/${file.name}` : file.name;
+            const lowerPath = targetRelativePath.toLowerCase().replace(/\\/g, '/');
             const fullPath = currentRootFolderPath + '/' + targetRelativePath;
+            const isText = /\.(md|txt|json|js|html|css|xml|yaml|yml|csv)$/i.test(file.name);
+            const isImg = IMG_REGEX.test(file.name);
+            const isVideo = VIDEO_REGEX.test(file.name);
 
             try {
                 await new Promise((resolve, reject) => {
                     const reader = new FileReader();
-                    const isText = /\.(md|txt|json|js|html|css|xml|yaml|yml|csv)$/i.test(file.name);
-
                     if (isText) {
                         reader.readAsText(file);
                         reader.onload = () => {
                             if (window.AndroidFS) {
                                 window.AndroidFS.writeFile(fullPath, reader.result);
                             }
-                            resolve();
+                            resolve(reader.result);
                         };
                     } else {
                         reader.readAsDataURL(file);
@@ -1226,20 +1321,94 @@ if (btnImportFile && importFileInput) {
                                     window.AndroidFS.writeFile(fullPath, reader.result);
                                 }
                             }
-                            resolve();
+                            resolve(null);
                         };
                     }
                     reader.onerror = reject;
+                }).then((textContent) => {
+                    // 增量写入内存结构，避免整树重扫后还要手动找文件
+                    if (isImg || isVideo) {
+                        const fileUrl = 'file://' + fullPath;
+                        mediaUrlsMap.set(lowerPath, fileUrl);
+                        mediaPathsMap.set(lowerPath, targetRelativePath);
+                        const lowerFileName = file.name.toLowerCase();
+                        if (!mediaShortNameMap.has(lowerFileName)) {
+                            mediaShortNameMap.set(lowerFileName, lowerPath);
+                        }
+                        insertPathToTree(mediaTree, targetRelativePath, {
+                            keyLower: lowerPath,
+                            path: targetRelativePath,
+                            fullPath: fullPath,
+                            isMedia: true,
+                            isVideo: isVideo
+                        });
+                        importedItems.push({
+                            type: 'media',
+                            keyLower: lowerPath,
+                            name: file.name,
+                            path: targetRelativePath,
+                            isVideo: isVideo
+                        });
+                    } else {
+                        // 文本/笔记（含 md）
+                        const fileName = file.name;
+                        fileDataMap.set(lowerPath, {
+                            text: textContent != null ? textContent : '',
+                            path: targetRelativePath,
+                            fullPath: fullPath,
+                            name: fileName
+                        });
+                        const lowerFileName = fileName.toLowerCase();
+                        if (!fileShortNameMap.has(lowerFileName)) {
+                            fileShortNameMap.set(lowerFileName, lowerPath);
+                        }
+                        insertPathToTree(mdTree, targetRelativePath, {
+                            keyLower: lowerPath,
+                            path: targetRelativePath,
+                            fullPath: fullPath,
+                            isMedia: false
+                        });
+                        importedItems.push({
+                            type: 'note',
+                            keyLower: lowerPath,
+                            name: fileName,
+                            path: targetRelativePath
+                        });
+                    }
+                    successCount++;
                 });
-                successCount++;
             } catch (err) {
                 console.error('导入文件失败:', file.name, err);
             }
         }
 
-        alert(`成功导入 ${successCount} 个文件！`);
-        importFileInput.value = ''; 
-        rescanDirectorySilently(); 
+        importFileInput.value = '';
+        refreshTrees();
+        updateCounts();
+
+        if (successCount === 0) {
+            alert('没有成功导入任何文件！');
+            return;
+        }
+
+        // 自动打开第一个导入的文件，并展开其目录位置
+        const first = importedItems[0];
+        if (first) {
+            if (first.type === 'note') {
+                loadMdContent(first.keyLower);
+            } else {
+                previewMedia(first.keyLower, first.name, first.path, first.isVideo);
+            }
+            setTimeout(() => {
+                if (first.type === 'note') {
+                    expandAndHighlightPath(first.keyLower, mdList, true);
+                } else {
+                    expandAndHighlightPath(first.keyLower, mediaList, true);
+                }
+            }, 60);
+        }
+
+        alert(`成功导入 ${successCount} 个文件，已自动打开第一个！`);
     });
 }
 
@@ -1687,14 +1856,38 @@ if (btnPaste) {
         }
 
         if (window.AndroidFS && window.AndroidFS.renameFileOrFolder(clipboardItem.fullPath, newFullPath)) {
-            alert('移动成功！');
-            
+            const movedType = clipboardItem.type;
+            const movedName = clipboardItem.name;
+            const destRelative = newRelativePath;
+
             clipboardItem = null;
             btnPaste.setAttribute('disabled', 'true');
             btnPaste.style.background = '';
             currentFolderPath = '';
-            
+
             rescanDirectorySilently();
+            refreshTrees();
+
+            // 移动后自动定位到目标位置
+            const destKey = destRelative.toLowerCase().replace(/\\/g, '/');
+            if (movedType === 'file') {
+                if (fileDataMap.has(destKey)) {
+                    loadMdContent(destKey);
+                    setTimeout(() => expandAndHighlightPath(destKey, mdList, true), 60);
+                } else if (mediaUrlsMap.has(destKey)) {
+                    const displayPath = mediaPathsMap.get(destKey) || destRelative;
+                    const isVideo = VIDEO_REGEX.test(movedName);
+                    previewMedia(destKey, movedName, displayPath, isVideo);
+                    setTimeout(() => expandAndHighlightPath(destKey, mediaList, true), 60);
+                }
+            } else {
+                currentFolderPath = destRelative;
+                setTimeout(() => {
+                    expandAndHighlightFolder(destRelative, mdList);
+                    expandAndHighlightFolder(destRelative, mediaList);
+                }, 60);
+            }
+            alert('移动成功！已定位到目标位置。');
         } else {
             alert('移动失败，请检查文件系统权限或目标路径是否存在同名文件！');
         }

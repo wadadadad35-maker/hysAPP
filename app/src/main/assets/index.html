@@ -9,7 +9,7 @@
     <script src="marked.min.js"></script>
     
     <!-- 引入外部 CSS 样式 -->
-    <link rel="stylesheet" href="style.css?v=12">
+    <link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
 
@@ -148,6 +148,10 @@
         <div class="custom-modal-content">
             <div class="custom-modal-header">📂 打开本地文件夹</div>
             <div class="custom-modal-body">
+                <p style="font-size:12px;color:#888;margin-bottom:8px;line-height:1.4;">
+                    推荐：点顶部「📁 打开文件夹」使用系统选择器。<br>
+                    若选择器无法解析路径，可在此手动输入绝对路径。
+                </p>
                 <label for="modal-path-input">请输入手机本地文件夹绝对路径：</label>
                 <input type="text" id="modal-path-input" placeholder="例如: /sdcard/Documents/Notes">
                 
@@ -159,6 +163,7 @@
             </div>
             <div class="custom-modal-footer">
                 <button class="btn btn-subtle" id="btn-modal-cancel">取消</button>
+                <button class="btn btn-zip" id="btn-modal-pick-system" title="调用系统文件夹选择器">📁 系统选择器</button>
                 <button class="btn btn-create" id="btn-modal-confirm">确定打开</button>
             </div>
         </div>
@@ -183,6 +188,6 @@
     <!-- 隐藏的本地文件导入选择器 -->
     <input type="file" id="import-file-input" style="display: none;" multiple>
 
-    <script src="script.js?v=16"></script>
+    <script src="script.js?v=17"></script>
 </body>
 </html>

@@ -5,6 +5,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.util.Base64;
 import android.view.KeyEvent;
@@ -38,6 +39,7 @@ public class MainActivity extends AppCompatActivity {
     private WebView webView;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILECHOOSER_RESULTCODE = 1;
+    private final static int FOLDER_CHOOSER_RESULTCODE = 2;
 
     // ========== 视频全屏相关 ==========
     private View customView;                          // 全屏时系统给的 View
@@ -265,6 +267,77 @@ public class MainActivity extends AppCompatActivity {
             if (uploadMessage == null) return;
             uploadMessage.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
             uploadMessage = null;
+            return;
+        }
+        // 系统文件夹选择器回调
+        if (requestCode == FOLDER_CHOOSER_RESULTCODE) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri treeUri = data.getData();
+                // 持久化权限，方便以后再次访问
+                final int takeFlags = data.getFlags()
+                        & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                try {
+                    getContentResolver().takePersistableUriPermission(treeUri, takeFlags);
+                } catch (Exception ignored) {}
+
+                String realPath = resolveTreeUriToPath(treeUri);
+                if (realPath != null && !realPath.isEmpty()) {
+                    // 回调前端：window.onFolderPicked(path)
+                    final String pathForJs = realPath.replace("\\", "\\\\").replace("'", "\\'");
+                    if (webView != null) {
+                        webView.post(() -> webView.evaluateJavascript(
+                                "if(typeof window.onFolderPicked==='function')window.onFolderPicked('" + pathForJs + "');",
+                                null));
+                    }
+                } else {
+                    if (webView != null) {
+                        webView.post(() -> webView.evaluateJavascript(
+                                "if(typeof window.onFolderPicked==='function')window.onFolderPicked(null);" +
+                                "alert('无法解析该文件夹的真实路径，请改用「手动输入路径」或选择内部存储下的目录。');",
+                                null));
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 将 ACTION_OPEN_DOCUMENT_TREE 返回的 content:// URI 尽量转成真实文件系统路径。
+     * 在已授予 MANAGE_EXTERNAL_STORAGE 时，主存储上的路径通常可正确解析。
+     */
+    private String resolveTreeUriToPath(Uri uri) {
+        if (uri == null) return null;
+        try {
+            String docId = DocumentsContract.getTreeDocumentId(uri);
+            if (docId == null) return null;
+            // 形如 primary:Documents/Notes  或  XXXX-XXXX:DCIM
+            String[] split = docId.split(":", 2);
+            if (split.length < 2) {
+                // 有些机型可能只有 volume id
+                if ("primary".equalsIgnoreCase(docId)) {
+                    return Environment.getExternalStorageDirectory().getAbsolutePath();
+                }
+                return null;
+            }
+            String type = split[0];
+            String relative = split[1];
+            if ("primary".equalsIgnoreCase(type)) {
+                File base = Environment.getExternalStorageDirectory();
+                if (relative == null || relative.isEmpty()) {
+                    return base.getAbsolutePath();
+                }
+                return new File(base, relative).getAbsolutePath();
+            } else {
+                // 外置 SD 卡等：/storage/<uuid>/<relative>
+                File storageRoot = new File("/storage/" + type);
+                if (relative == null || relative.isEmpty()) {
+                    return storageRoot.getAbsolutePath();
+                }
+                return new File(storageRoot, relative).getAbsolutePath();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
         }
     }
 
@@ -417,6 +490,33 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception e) {
                 return false;
             }
+        }
+
+        /**
+         * 打开系统文件夹选择器（ACTION_OPEN_DOCUMENT_TREE）
+         * 选中后会通过 window.onFolderPicked(path) 回调前端真实路径
+         */
+        @JavascriptInterface
+        public void pickFolder() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                        startActivityForResult(intent, FOLDER_CHOOSER_RESULTCODE);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        if (webView != null) {
+                            webView.evaluateJavascript(
+                                    "alert('无法打开系统文件夹选择器，请改用手动输入路径。');",
+                                    null);
+                        }
+                    }
+                }
+            });
         }
 
         /**
