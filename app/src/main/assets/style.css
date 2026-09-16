@@ -1040,3 +1040,34 @@ body.video-pseudo-fs #global-search-panel {
 body.video-pseudo-fs #video-seek-indicator {
     z-index: 10060;
 }
+
+
+/* ==================== 打开文件夹双选项弹窗 ==================== */
+.open-folder-option {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.open-folder-option-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: #4fc1ff;
+}
+.open-folder-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 12px 0;
+    color: #666;
+    font-size: 12px;
+}
+.open-folder-divider::before,
+.open-folder-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #3c3c3c;
+}
+.open-folder-divider span {
+    flex-shrink: 0;
+}

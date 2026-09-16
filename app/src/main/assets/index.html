@@ -9,7 +9,7 @@
     <script src="marked.min.js"></script>
     
     <!-- 引入外部 CSS 样式 -->
-    <link rel="stylesheet" href="style.css?v=13">
+    <link rel="stylesheet" href="style.css?v=14">
 </head>
 <body>
 
@@ -148,23 +148,32 @@
         <div class="custom-modal-content">
             <div class="custom-modal-header">📂 打开本地文件夹</div>
             <div class="custom-modal-body">
-                <p style="font-size:12px;color:#888;margin-bottom:8px;line-height:1.4;">
-                    推荐：点顶部「📁 打开文件夹」使用系统选择器。<br>
-                    若选择器无法解析路径，可在此手动输入绝对路径。
-                </p>
-                <label for="modal-path-input">请输入手机本地文件夹绝对路径：</label>
-                <input type="text" id="modal-path-input" placeholder="例如: /sdcard/Documents/Notes">
-                
-                <!-- 最近路径控件 -->
-                <div class="recent-paths-container">
-                    <button type="button" class="btn btn-subtle btn-recent" id="btn-show-recent">🕒 最近路径</button>
-                    <div id="recent-paths-list" class="recent-paths-list" style="display: none;"></div>
+                <!-- 方式一：系统文件管理器 -->
+                <div class="open-folder-option">
+                    <div class="open-folder-option-title">方式一：系统文件管理器</div>
+                    <button type="button" class="btn btn-zip" id="btn-modal-pick-system" style="width:100%;justify-content:center;padding:10px 12px;font-size:13px;">
+                        📁 用文件管理器选择文件夹
+                    </button>
+                    <p style="font-size:11px;color:#888;margin-top:6px;line-height:1.4;">弹出系统目录选择界面，点选后自动打开。</p>
+                </div>
+
+                <div class="open-folder-divider"><span>或</span></div>
+
+                <!-- 方式二：手动路径 + 最近路径 -->
+                <div class="open-folder-option">
+                    <div class="open-folder-option-title">方式二：输入 / 常用路径</div>
+                    <label for="modal-path-input">请输入手机本地文件夹绝对路径：</label>
+                    <input type="text" id="modal-path-input" placeholder="例如: /sdcard/Documents/Notes">
+                    
+                    <div class="recent-paths-container">
+                        <button type="button" class="btn btn-subtle btn-recent" id="btn-show-recent">🕒 最近路径</button>
+                        <div id="recent-paths-list" class="recent-paths-list" style="display: none;"></div>
+                    </div>
                 </div>
             </div>
             <div class="custom-modal-footer">
                 <button class="btn btn-subtle" id="btn-modal-cancel">取消</button>
-                <button class="btn btn-zip" id="btn-modal-pick-system" title="调用系统文件夹选择器">📁 系统选择器</button>
-                <button class="btn btn-create" id="btn-modal-confirm">确定打开</button>
+                <button class="btn btn-create" id="btn-modal-confirm">确定打开路径</button>
             </div>
         </div>
     </div>
@@ -188,6 +197,6 @@
     <!-- 隐藏的本地文件导入选择器 -->
     <input type="file" id="import-file-input" style="display: none;" multiple>
 
-    <script src="script.js?v=17"></script>
+    <script src="script.js?v=18"></script>
 </body>
 </html>

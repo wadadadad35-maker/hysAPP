@@ -759,8 +759,11 @@ function showPathModal() {
     if (modalPathInput) {
         modalPathInput.value = currentRootFolderPath || "/sdcard/Documents/";
     }
+    // 打开时直接展示最近路径，方便一键选用
     if (recentPathsList) {
-        recentPathsList.style.display = 'none';
+        renderRecentPaths();
+        const paths = getRecentPaths();
+        recentPathsList.style.display = paths.length > 0 ? 'flex' : 'none';
     }
     if (customPathModal) {
         customPathModal.classList.add('active');
@@ -822,19 +825,8 @@ function executeFolderScan(inputPath, isSilent = false) {
     }
 }
 
-// 优先使用系统文件夹选择器；失败或不可用时再弹出路径输入框
-btnTriggerFolder.addEventListener('click', () => {
-    if (typeof window.AndroidFS !== 'undefined' && typeof window.AndroidFS.pickFolder === 'function') {
-        // 同时保留手动输入作为备选：长按或点「手动输入路径」仍可用
-        try {
-            window.AndroidFS.pickFolder();
-            return;
-        } catch (e) {
-            console.warn('pickFolder 调用失败，回退到路径输入', e);
-        }
-    }
-    showPathModal();
-});
+// 点击「打开文件夹」→ 弹出双选项：系统文件管理器 / 路径输入（含最近路径）
+btnTriggerFolder.addEventListener('click', showPathModal);
 
 /** 原生文件夹选择器回调（由 MainActivity 注入） */
 window.onFolderPicked = function (path) {
