@@ -1176,6 +1176,22 @@ btnCreateFile.addEventListener('click', () => {
     insertPathToTree(mdTree, relativePath, { keyLower: lowerPath, path: relativePath, fullPath: fullPath, isMedia: false });
     refreshTrees();
     loadMdContent(lowerPath);
+
+    // 树重绘后默认全折叠：自动展开到新建文件所在路径并高亮，避免再去搜索
+    // 保持抽屉打开状态，方便继续操作
+    if (bottomSheet && !bottomSheet.classList.contains('active')) {
+        bottomSheet.classList.add('active');
+        if (drawerOverlay) drawerOverlay.classList.add('active');
+    }
+    setTimeout(() => {
+        expandAndHighlightPath(lowerPath, mdList, true);
+        // 同步记下当前所在文件夹，方便继续「新文件/导入」到同一目录
+        if (relativePath.includes('/')) {
+            currentFolderPath = relativePath.substring(0, relativePath.lastIndexOf('/'));
+        } else {
+            currentFolderPath = '';
+        }
+    }, 80);
 });
 
 btnCreateFolder.addEventListener('click', () => {
@@ -1212,9 +1228,15 @@ btnCreateFolder.addEventListener('click', () => {
     refreshTrees();
     // 选中并展开新建的文件夹，免去用户再去目录里找
     currentFolderPath = folderPath;
-    document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('active'));
-    expandAndHighlightFolder(folderPath, mdList);
-    expandAndHighlightFolder(folderPath, mediaList);
+    if (bottomSheet && !bottomSheet.classList.contains('active')) {
+        bottomSheet.classList.add('active');
+        if (drawerOverlay) drawerOverlay.classList.add('active');
+    }
+    setTimeout(() => {
+        document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('active'));
+        expandAndHighlightFolder(folderPath, mdList);
+        expandAndHighlightFolder(folderPath, mediaList);
+    }, 80);
 });
 
 /**
