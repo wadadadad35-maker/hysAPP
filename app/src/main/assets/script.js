@@ -1530,10 +1530,10 @@ btnDeleteFile.addEventListener('click', () => {
             bottomSheet.classList.add('active');
             if (drawerOverlay) drawerOverlay.classList.add('active');
         }
-        // 删的是媒体：只展开媒体资源树中的父文件夹
         setTimeout(() => {
             if (parentFolder) {
                 expandAndHighlightFolder(parentFolder, mediaList);
+                expandAndHighlightFolder(parentFolder, mdList);
             }
         }, 80);
         alert('媒体文件已删除！');
@@ -1579,10 +1579,10 @@ btnDeleteFile.addEventListener('click', () => {
         bottomSheet.classList.add('active');
         if (drawerOverlay) drawerOverlay.classList.add('active');
     }
-    // 删的是文章：只展开笔记目录树中的父文件夹
     setTimeout(() => {
         if (parentFolder) {
             expandAndHighlightFolder(parentFolder, mdList);
+            expandAndHighlightFolder(parentFolder, mediaList);
         }
     }, 80);
 });
