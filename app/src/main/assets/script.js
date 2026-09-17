@@ -1297,7 +1297,19 @@ if (btnImportFile && importFileInput) {
         const files = e.target.files;
         if (!files || files.length === 0) return;
 
-        const targetFolder = currentFolderPath ? currentFolderPath : '';
+        // 与「新建文件/文件夹」保持一致：
+        // 1. 优先使用当前选中的文件夹
+        // 2. 若只选中了某个文件/图片/视频，则导入到该文件所在的父文件夹
+        // 3. 都没有时落到根目录
+        let targetFolder = '';
+        if (currentFolderPath) {
+            targetFolder = currentFolderPath;
+        } else if (currentFileKey && currentFileKey.includes('/')) {
+            targetFolder = currentFileKey.substring(0, currentFileKey.lastIndexOf('/'));
+        } else if (activeMediaPath && activeMediaPath.includes('/')) {
+            const mediaNorm = activeMediaPath.replace(/\\/g, '/');
+            targetFolder = mediaNorm.substring(0, mediaNorm.lastIndexOf('/'));
+        }
         let successCount = 0;
         // 记录本次成功导入的条目，用于增量更新并自动打开
         const importedItems = [];
