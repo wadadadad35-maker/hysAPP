@@ -705,8 +705,12 @@ function setupTreeDelegation(containerEl) {
             e.stopPropagation();
             const li = folderHeader.parentElement;
 
-            // 点击文件夹只负责浏览/展开，不改变当前正在查看的文件。
-            // 因此 currentFileKey、activeMediaPath 以及当前文件的高亮都保持不变。
+            // 点击文件夹时：记录“当前选中的文件夹”，供新建/导入/删除文件夹等操作使用。
+            // 但不能清除 currentFileKey，因为当前正在查看的文件仍然应该保持不变。
+            if (li && li.dataset.folderPath) {
+                currentFolderPath = li.dataset.folderPath;
+            }
+
 
             if (li && li._ensureRendered) {
                 const childrenUl = li._ensureRendered();
