@@ -518,6 +518,9 @@ function closeDrawer() {
     bottomSheet.classList.remove('active');
     drawerOverlay.classList.remove('active');
     bottomSheet.style.transform = '';
+    // 退出目录后清除已选中的文件夹记录，下次新建文件/文件夹需重新选择
+    currentFolderPath = '';
+    document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('active'));
 }
 
 btnOpenDrawer.addEventListener('click', openDrawer);
