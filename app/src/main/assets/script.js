@@ -1639,21 +1639,29 @@ if (btnLastProgress) {
             targetFolder = getCurrentMediaFolderPath();
         }
 
+        // 「上次进度」按钮只恢复图片/视频，绝不打开文章
         if (!targetFolder) {
-            // 没有选中子文件夹时，恢复整体最后一次（可能是文章或图片）
-            const ok = restoreFolderViewState(currentRootFolderPath, '');
+            // 无选中子文件夹：从 __last__ 取进度，但强制只走媒体
+            const state = getFolderViewState(currentRootFolderPath, '');
+            let ok = false;
+            if (state && (state.isMedia || state.mediaPath)) {
+                const mediaKey = (state.mediaPath || state.fileKey || '').toLowerCase().replace(/\\/g, '/');
+                if (mediaKey && mediaUrlsMap.has(mediaKey)) {
+                    ok = restoreMediaByKey(mediaKey, state);
+                } else if (state.fileKey && mediaUrlsMap.has(state.fileKey)) {
+                    ok = restoreMediaByKey(state.fileKey, state);
+                }
+            }
             if (ok) {
                 closeDrawer();
                 setTimeout(() => {
                     if (activeMediaPath) {
                         expandAndHighlightPath(activeMediaPath.toLowerCase(), mediaList, true);
-                    } else if (currentFileKey) {
-                        expandAndHighlightPath(currentFileKey, mdList, true);
                     }
                 }, 50);
-                alert('已跳转到上次阅读位置');
+                alert('已跳转到上次图片/媒体进度');
             } else {
-                alert('暂无保存的进度记录');
+                alert('暂无保存的图片进度\n（进入任意文件夹下的图片后会自动记住）');
             }
             return;
         }
