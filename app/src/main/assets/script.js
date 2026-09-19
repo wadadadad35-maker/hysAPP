@@ -1430,7 +1430,10 @@ if (btnImportFile && importFileInput) {
                 if (first.type === 'note') {
                     expandAndHighlightPath(first.keyLower, mdList, true);
                 } else {
+                    // 展开媒体树中的文件位置
                     expandAndHighlightPath(first.keyLower, mediaList, true);
+                    // 同时展开笔记目录中的同一文件夹，方便写文章时定位并复制链接
+                    expandAndHighlightPath(first.keyLower, mdList, false);
                 }
             }, 60);
         }
