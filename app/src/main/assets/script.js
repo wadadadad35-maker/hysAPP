@@ -68,6 +68,7 @@ const btnShowRecent = document.getElementById('btn-show-recent');
 const recentPathsList = document.getElementById('recent-paths-list');
 
 const btnSave = document.getElementById('btn-save');
+const btnUndo = document.getElementById('btn-undo');
 const btnRefresh = document.getElementById('btn-refresh');
 
 const modeToggleGroup = document.getElementById('mode-toggle-group');
@@ -120,6 +121,41 @@ let clipboardItem = null;
 // 笔记内搜索全局状态
 let noteSearchMatches = [];
 let currentNoteSearchIndex = -1;
+
+// 单步撤销：始终只记住「上一次修改前」的内容；每次 input 都会更新；切换文章时清空
+// 撤销时与当前内容互换，再点一次可重做
+let undoContent = null;
+let lastKnownEditorValue = '';
+
+function updateUndoButton() {
+    if (btnUndo) {
+        btnUndo.disabled = (undoContent === null);
+    }
+}
+
+function resetUndoState() {
+    undoContent = null;
+    lastKnownEditorValue = editor ? editor.value : '';
+    updateUndoButton();
+}
+
+function performUndo() {
+    if (undoContent === null || !editor || !currentFileKey) return;
+    const current = editor.value;
+    editor.value = undoContent;
+    // 互换：再点一次相当于重做
+    undoContent = current;
+    lastKnownEditorValue = editor.value;
+    updateUndoButton();
+    syncCurrentContent();
+    markFileDirty();
+    triggerDebouncedSave();
+    if (currentMode === 'preview') {
+        renderMarkdown();
+    }
+    resetNoteSearch();
+    editor.focus();
+}
 
 // ==================== 进度记忆（双轨） ====================
 // 1. __last__：整个根目录「最后一次看的内容」（文章或图片），用于重新打开应用时恢复
@@ -334,6 +370,12 @@ function triggerDebouncedSave() {
 if (editor) {
     editor.addEventListener('input', () => {
         editor.classList.remove('is-searching');
+        // 每次内容变化都把「变化前」记为可撤销状态（只保留上一次）
+        if (editor.value !== lastKnownEditorValue) {
+            undoContent = lastKnownEditorValue;
+            updateUndoButton();
+        }
+        lastKnownEditorValue = editor.value;
         syncCurrentContent();
         markFileDirty();
         triggerDebouncedSave();
@@ -347,6 +389,10 @@ if (editor) {
         editor.classList.remove('is-searching');
         editor.removeAttribute('inputmode');
     });
+}
+
+if (btnUndo) {
+    btnUndo.addEventListener('click', performUndo);
 }
 
 function truncateName(name, maxLength = 10) {
@@ -1051,6 +1097,8 @@ function loadMdContent(keyLower) {
     cancelPendingSave();
     editor.removeAttribute('readonly');
     btnSave.removeAttribute('disabled');
+    // 切换文章时清空撤销状态
+    resetUndoState();
 
     if (currentMode === 'preview') {
         editor.style.display = 'none';
