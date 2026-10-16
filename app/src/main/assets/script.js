@@ -754,12 +754,13 @@ function setupTreeDelegation(containerEl) {
             e.stopPropagation();
             const li = folderHeader.parentElement;
 
-            // 点击文件夹时：记录“当前选中的文件夹”，供新建/导入/删除文件夹等操作使用。
-            // 但不能清除 currentFileKey，因为当前正在查看的文件仍然应该保持不变。
+            // 点击文件夹时：记录“当前选中的文件夹”，供新建/导入/删除/剪切文件夹等操作使用。
+            // 不能清除 currentFileKey，因为当前正在查看的文件仍然应该保持不变。
             if (li && li.dataset.folderPath) {
                 currentFolderPath = li.dataset.folderPath;
+                document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('active'));
+                folderHeader.classList.add('active');
             }
-
 
             if (li && li._ensureRendered) {
                 const childrenUl = li._ensureRendered();
@@ -1924,16 +1925,49 @@ if (btnSwitchResource) {
 }
 
 // ==================== 剪切与粘贴功能 ====================
+/**
+ * 剪切目标优先级（与「新建文件/文件夹」一致）：
+ * 1. 目录树中已选中的文件夹（currentFolderPath）
+ * 2. 当前正在查看的媒体（图片/视频）
+ * 3. 当前正在查看的笔记文件
+ */
+function normalizeRelPath(p) {
+    return (p || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').toLowerCase();
+}
+
+function getCurrentOpenRelativePath() {
+    // 正在看媒体
+    if (mediaViewer && mediaViewer.style.display !== 'none' && activeMediaPath) {
+        return activeMediaPath.replace(/\\/g, '/');
+    }
+    // 正在看笔记
+    if (currentFileKey && fileDataMap.has(currentFileKey)) {
+        const item = fileDataMap.get(currentFileKey);
+        return item ? item.path : '';
+    }
+    // 媒体 key 仍在 currentFileKey 上、但 viewer 可能已切走的兜底
+    if (currentFileKey && mediaPathsMap.has(currentFileKey)) {
+        return mediaPathsMap.get(currentFileKey) || '';
+    }
+    return '';
+}
+
 if (btnCut) {
     btnCut.addEventListener('click', () => {
         syncCurrentContent();
 
+        // 再次点击同一目标 → 取消剪切
         if (clipboardItem) {
-            const currentItem = currentFileKey ? fileDataMap.get(currentFileKey) : null;
-            const isSameFile = currentItem && clipboardItem.type === 'file' && clipboardItem.relativePath === currentItem.path;
-            const isSameFolder = !currentItem && currentFolderPath && clipboardItem.type === 'folder' && clipboardItem.relativePath === currentFolderPath;
-
-            if (isSameFile || isSameFolder) {
+            let isSame = false;
+            if (clipboardItem.type === 'folder') {
+                isSame = !!currentFolderPath &&
+                    normalizeRelPath(clipboardItem.relativePath) === normalizeRelPath(currentFolderPath);
+            } else {
+                const openRel = getCurrentOpenRelativePath();
+                isSame = !!openRel &&
+                    normalizeRelPath(clipboardItem.relativePath) === normalizeRelPath(openRel);
+            }
+            if (isSame) {
                 clipboardItem = null;
                 if (btnPaste) {
                     btnPaste.setAttribute('disabled', 'true');
@@ -1944,8 +1978,37 @@ if (btnCut) {
             }
         }
 
-        if (currentFileKey) {
+        // —— 1. 优先：目录树选中的文件夹（与新建逻辑一致）——
+        if (currentFolderPath) {
+            const parts = currentFolderPath.replace(/\\/g, '/').split('/').filter(Boolean);
+            const folderName = parts[parts.length - 1] || currentFolderPath;
+            clipboardItem = {
+                type: 'folder',
+                relativePath: currentFolderPath.replace(/\\/g, '/'),
+                fullPath: currentRootFolderPath + '/' + currentFolderPath.replace(/\\/g, '/'),
+                name: folderName
+            };
+            alert(`已剪切文件夹："${folderName}"\n再次点击可取消剪切；或选择目标文件夹后点击“粘贴”`);
+        }
+        // —— 2. 当前正在查看的媒体（图片/视频）——
+        else if (mediaViewer && mediaViewer.style.display !== 'none' && activeMediaPath) {
+            const rel = activeMediaPath.replace(/\\/g, '/');
+            const fileName = rel.split('/').filter(Boolean).pop() || rel;
+            clipboardItem = {
+                type: 'file',
+                relativePath: rel,
+                fullPath: currentRootFolderPath + '/' + rel,
+                name: fileName
+            };
+            alert(`已剪切媒体："${fileName}"\n再次点击可取消剪切；或选择目标文件夹后点击“粘贴”`);
+        }
+        // —— 3. 当前正在查看的笔记文件 ——
+        else if (currentFileKey && fileDataMap.has(currentFileKey)) {
             const item = fileDataMap.get(currentFileKey);
+            if (!item) {
+                alert('请先选择要剪切的文件或文件夹！');
+                return;
+            }
             clipboardItem = {
                 type: 'file',
                 relativePath: item.path,
@@ -1953,18 +2016,8 @@ if (btnCut) {
                 name: item.name
             };
             alert(`已剪切文件："${item.name}"\n再次点击可取消剪切；或选择目标文件夹后点击“粘贴”`);
-        } else if (currentFolderPath) {
-            const parts = currentFolderPath.split('/');
-            const folderName = parts[parts.length - 1];
-            clipboardItem = {
-                type: 'folder',
-                relativePath: currentFolderPath,
-                fullPath: currentRootFolderPath + '/' + currentFolderPath,
-                name: folderName
-            };
-            alert(`已剪切文件夹："${folderName}"\n再次点击可取消剪切；或选择目标文件夹后点击“粘贴”`);
         } else {
-            alert('请先选择要剪切的文件或文件夹！');
+            alert('请先选择要剪切的文件或文件夹！\n（在目录树中点选文件夹，或打开某个笔记/图片/视频）');
             return;
         }
 
