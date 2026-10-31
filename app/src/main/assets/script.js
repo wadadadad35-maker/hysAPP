@@ -3242,6 +3242,9 @@ function openGlobalSearchPanel() {
 function closeGlobalSearchPanel() {
     if (globalSearchPanel) globalSearchPanel.classList.remove('active');
     if (globalSearchOverlay) globalSearchOverlay.classList.remove('active');
+    // 关闭时清空结果 DOM，减少常驻节点
+    if (globalSearchResults) globalSearchResults.innerHTML = '';
+    if (globalSearchStatus) globalSearchStatus.textContent = '输入关键词后点击搜索，将扫描全部笔记内容';
 }
 
 function escapeHtml(str) {
@@ -3384,6 +3387,13 @@ function performGlobalSearch() {
 
         renderGlobalSearchResults(results, query, scanned);
         globalSearchInProgress = false;
+
+        // 方案A：搜索结束后释放全文缓存（保留当前正在编辑的文件，避免内存只进不出）
+        fileDataMap.forEach((item, key) => {
+            if (key !== currentFileKey) {
+                item.text = '';
+            }
+        });
     }, 30);
 }
 
