@@ -161,7 +161,7 @@ function performUndo() {
 // 1. __last__：整个根目录「最后一次看的内容」（文章或图片），用于重新打开应用时恢复
 // 2. 子文件夹 key：只记图片/视频，用于「📍 上次进度」按钮换漫画
 const FOLDER_VIEW_STATE_KEY = 'folder_view_states_v2';
-const MAX_FOLDER_VIEW_STATES = 70;
+const MAX_FOLDER_VIEW_STATES = 25;
 
 function normalizeRootFolderPath(path) {
     return (path || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
@@ -192,6 +192,22 @@ function getFolderViewStates() {
         return (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
     } catch (e) {
         return {};
+    }
+}
+
+/** 主动裁剪过旧的阅读进度，防止 localStorage 长期积累导致键盘弹出时白边 */
+function pruneFolderViewStates() {
+    try {
+        const states = getFolderViewStates();
+        const entries = Object.entries(states)
+            .sort((a, b) => (b[1]?.updatedAt || 0) - (a[1]?.updatedAt || 0))
+            .slice(0, MAX_FOLDER_VIEW_STATES);
+        if (entries.length !== Object.keys(states).length) {
+            localStorage.setItem(FOLDER_VIEW_STATE_KEY, JSON.stringify(Object.fromEntries(entries)));
+            console.log('[prune] folder_view_states 已裁剪到', entries.length, '条');
+        }
+    } catch (e) {
+        console.error('pruneFolderViewStates 失败:', e);
     }
 }
 
@@ -554,6 +570,7 @@ function autoExpandCurrentFile() {
 
 function openDrawer() {
     syncCurrentContent();
+    pruneFolderViewStates();   // 打开抽屉时顺便裁剪旧进度，防止数据越积越多
     resetTreeCollapse();
     bottomSheet.classList.add('active');
     drawerOverlay.classList.add('active');
@@ -2869,6 +2886,36 @@ searchInput.addEventListener('keydown', (e) => {
     }
 });
 
+// 搜索框获焦/失焦时强制布局恢复，减少键盘弹出导致的左右白边
+if (searchInput) {
+    searchInput.addEventListener('focus', () => {
+        // 临时去掉可能残留的 transform 合成层
+        if (bottomSheet) {
+            bottomSheet.style.willChange = 'auto';
+            bottomSheet.style.transform = bottomSheet.classList.contains('active') ? 'translateX(0)' : 'translateX(-100%)';
+        }
+        // 强制一次 reflow
+        void document.body.offsetHeight;
+        if (document.documentElement) {
+            document.documentElement.style.width = '100%';
+            document.body.style.width = '100%';
+        }
+    });
+    searchInput.addEventListener('blur', () => {
+        // 键盘收起后再强制一次
+        setTimeout(() => {
+            void document.body.offsetHeight;
+            if (document.documentElement) {
+                document.documentElement.style.width = '100%';
+                document.body.style.width = '100%';
+            }
+            if (bottomSheet && bottomSheet.classList.contains('active')) {
+                bottomSheet.style.transform = 'translateX(0)';
+            }
+        }, 100);
+    });
+}
+
 // ==================== 当前笔记内文本搜索功能 ====================
 function resetNoteSearch() {
     noteSearchMatches = [];
@@ -3190,6 +3237,7 @@ window.addEventListener('pagehide', saveFolderViewState);
 
 // ==================== 页面初始化与状态自动恢复 ====================
 window.addEventListener('DOMContentLoaded', () => {
+    pruneFolderViewStates();   // 启动时先裁剪一次，避免历史积累的进度数据过大
     const savedPath = localStorage.getItem('last_folder_path');
 
     if (savedPath) {
@@ -3242,9 +3290,6 @@ function openGlobalSearchPanel() {
 function closeGlobalSearchPanel() {
     if (globalSearchPanel) globalSearchPanel.classList.remove('active');
     if (globalSearchOverlay) globalSearchOverlay.classList.remove('active');
-    // 关闭时清空结果 DOM，减少常驻节点
-    if (globalSearchResults) globalSearchResults.innerHTML = '';
-    if (globalSearchStatus) globalSearchStatus.textContent = '输入关键词后点击搜索，将扫描全部笔记内容';
 }
 
 function escapeHtml(str) {
@@ -3387,13 +3432,6 @@ function performGlobalSearch() {
 
         renderGlobalSearchResults(results, query, scanned);
         globalSearchInProgress = false;
-
-        // 方案A：搜索结束后释放全文缓存（保留当前正在编辑的文件，避免内存只进不出）
-        fileDataMap.forEach((item, key) => {
-            if (key !== currentFileKey) {
-                item.text = '';
-            }
-        });
     }, 30);
 }
 
