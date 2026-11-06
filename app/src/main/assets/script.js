@@ -161,7 +161,7 @@ function performUndo() {
 // 1. __last__：整个根目录「最后一次看的内容」（文章或图片），用于重新打开应用时恢复
 // 2. 子文件夹 key：只记图片/视频，用于「📍 上次进度」按钮换漫画
 const FOLDER_VIEW_STATE_KEY = 'folder_view_states_v2';
-const MAX_FOLDER_VIEW_STATES = 25;
+const MAX_FOLDER_VIEW_STATES = 50;
 
 function normalizeRootFolderPath(path) {
     return (path || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
