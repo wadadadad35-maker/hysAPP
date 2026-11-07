@@ -2751,6 +2751,13 @@ imageModal.addEventListener('click', (e) => {
             streamObserver = null;
         }
         imageModal.style.display = 'none';
+        // 关闭大图后，把外层媒体预览同步到当前页（流式滑动时 index 已变但外层未刷新）
+        if (currentMediaList && currentMediaIndex >= 0 && currentMediaIndex < currentMediaList.length) {
+            const item = currentMediaList[currentMediaIndex];
+            if (item && !item.isVideo) {
+                previewMedia(item.keyLower, item.name, item.path, false);
+            }
+        }
         return;
     }
 
@@ -2776,6 +2783,13 @@ modalClose.addEventListener('click', () => {
         streamObserver = null;
     }
     imageModal.style.display = 'none';
+    // 关闭大图后，把外层媒体预览同步到当前页
+    if (currentMediaList && currentMediaIndex >= 0 && currentMediaIndex < currentMediaList.length) {
+        const item = currentMediaList[currentMediaIndex];
+        if (item && !item.isVideo) {
+            previewMedia(item.keyLower, item.name, item.path, false);
+        }
+    }
 });
 
 // ==================== 音量键与方向键翻页监听 ====================
