@@ -109,6 +109,10 @@ let currentMediaList = [];
 let currentMediaIndex = -1;
 let currentModalMode = 'paged';
 let streamObserver = null;
+/** 流式模式按需渲染窗口：只保留当前索引 ± STREAM_WINDOW_HALF 张图片 */
+const STREAM_WINDOW_HALF = 3;
+let streamRenderedStart = 0;
+let streamRenderedEnd = -1;
 let lastRenderedText = '';
 
 let saveDebounceTimer = null;
@@ -2569,6 +2573,17 @@ function initStreamObserver() {
                 if (!isNaN(idx) && idx !== currentMediaIndex) {
                     currentMediaIndex = idx;
                     updateModalCounter();
+
+                    // 若当前居中图片接近窗口边缘，重新以当前索引为中心渲染窗口（保持只保留 ±3）
+                    const nearEdge = (idx - streamRenderedStart <= 1) || (streamRenderedEnd - idx <= 1);
+                    if (nearEdge) {
+                        // 延迟一帧再渲染，避免与滚动冲突
+                        requestAnimationFrame(() => {
+                            if (currentModalMode === 'stream' && imageModal.style.display === 'flex') {
+                                renderModalStreamView(true); // true = 保持当前滚动意图，平滑过渡
+                            }
+                        });
+                    }
                 }
             }
         });
@@ -2582,30 +2597,97 @@ function initStreamObserver() {
     imgs.forEach(img => streamObserver.observe(img));
 }
 
-function renderModalStreamView() {
-    modalStreamView.innerHTML = '';
-    if (!currentMediaList) return;
+/**
+ * 流式模式按需渲染：只创建并加载当前索引 ± STREAM_WINDOW_HALF 张图片
+ * @param {boolean} [preserveScroll=false] 是否尽量保持视觉连续性（用于滚动扩展时）
+ */
+function renderModalStreamView(preserveScroll = false) {
+    if (!currentMediaList || currentMediaList.length === 0) {
+        modalStreamView.innerHTML = '';
+        streamRenderedStart = 0;
+        streamRenderedEnd = -1;
+        return;
+    }
 
-    currentMediaList.forEach((item, idx) => {
-        if (item.isVideo) return;
+    // 只收集非视频图片的有效索引范围
+    const validIndices = [];
+    for (let i = 0; i < currentMediaList.length; i++) {
+        if (!currentMediaList[i].isVideo) validIndices.push(i);
+    }
+    if (validIndices.length === 0) {
+        modalStreamView.innerHTML = '';
+        return;
+    }
+
+    // 以当前 currentMediaIndex 为中心取窗口（若当前是视频则找最近的图片）
+    let centerIdx = currentMediaIndex;
+    if (currentMediaList[centerIdx] && currentMediaList[centerIdx].isVideo) {
+        // 找最近的非视频
+        let found = -1;
+        for (let d = 1; d < currentMediaList.length; d++) {
+            if (centerIdx - d >= 0 && !currentMediaList[centerIdx - d].isVideo) { found = centerIdx - d; break; }
+            if (centerIdx + d < currentMediaList.length && !currentMediaList[centerIdx + d].isVideo) { found = centerIdx + d; break; }
+        }
+        if (found === -1) {
+            modalStreamView.innerHTML = '';
+            return;
+        }
+        centerIdx = found;
+        currentMediaIndex = found;
+    }
+
+    const start = Math.max(0, centerIdx - STREAM_WINDOW_HALF);
+    const end = Math.min(currentMediaList.length - 1, centerIdx + STREAM_WINDOW_HALF);
+
+    // 如果窗口范围没变且已有内容，可跳过（但通常滚动扩展时会变）
+    const needRebuild = (start !== streamRenderedStart || end !== streamRenderedEnd || modalStreamView.children.length === 0);
+
+    if (!needRebuild && !preserveScroll) {
+        // 仅更新目标高亮与滚动
+        const oldTarget = document.getElementById('target-stream-img');
+        if (oldTarget) oldTarget.removeAttribute('id');
+        const newTarget = modalStreamView.querySelector(`img[data-index="${centerIdx}"]`);
+        if (newTarget) {
+            newTarget.id = 'target-stream-img';
+            newTarget.scrollIntoView({ behavior: preserveScroll ? 'smooth' : 'auto', block: 'center' });
+        }
+        updateModalCounter();
+        return;
+    }
+
+    // 记录旧的目标图片高度，用于简单补偿（可选）
+    const oldTargetEl = document.getElementById('target-stream-img');
+    const oldScrollTop = modalStreamView.scrollTop;
+
+    modalStreamView.innerHTML = '';
+    streamRenderedStart = start;
+    streamRenderedEnd = end;
+
+    for (let idx = start; idx <= end; idx++) {
+        const item = currentMediaList[idx];
+        if (!item || item.isVideo) continue;
+
         const url = item.srcUrl || mediaUrlsMap.get(item.keyLower) || '';
         const streamImg = document.createElement('img');
         streamImg.src = url;
         streamImg.dataset.index = idx;
-        if (idx === currentMediaIndex) {
+        streamImg.loading = 'eager'; // 窗口内立即加载
+        streamImg.decoding = 'async';
+        if (idx === centerIdx) {
             streamImg.id = 'target-stream-img';
         }
         modalStreamView.appendChild(streamImg);
-    });
+    }
 
     updateModalCounter();
 
     const targetEl = document.getElementById('target-stream-img');
     if (targetEl) {
+        // 短延迟确保布局完成后再滚动
         setTimeout(() => {
-            targetEl.scrollIntoView({ behavior: 'auto', block: 'center' });
+            targetEl.scrollIntoView({ behavior: preserveScroll ? 'smooth' : 'auto', block: 'center' });
             initStreamObserver();
-        }, 50);
+        }, 30);
     } else {
         initStreamObserver();
     }
@@ -2675,11 +2757,14 @@ function switchMedia(direction) {
             modalImg.src = url;
             updateModalCounter();
         } else if (currentModalMode === 'stream') {
+            // 目标可能不在当前渲染窗口内，重新以新索引为中心渲染
             const targetImg = modalStreamView.querySelector(`img[data-index="${currentMediaIndex}"]`);
             if (targetImg) {
                 targetImg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                updateModalCounter();
+            } else {
+                renderModalStreamView(false);
             }
-            updateModalCounter();
         }
     }
 }
