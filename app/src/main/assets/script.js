@@ -109,8 +109,8 @@ let currentMediaList = [];
 let currentMediaIndex = -1;
 let currentModalMode = 'paged';
 let streamObserver = null;
-/** 流式模式按需渲染：只保留当前索引 ± STREAM_WINDOW_HALF 张 */
-const STREAM_WINDOW_HALF = 3;
+/** 流式模式按需渲染：只保留当前索引 ± STREAM_WINDOW_HALF 张（9 ≈ 同时约19张，兼顾流畅与内存） */
+const STREAM_WINDOW_HALF = 9;
 let streamRenderedStart = 0;
 let streamRenderedEnd = -1;
 /** 跳转/重建时短暂忽略 Observer，防止 index 被抢回导致闪烁 */
@@ -2592,24 +2592,23 @@ function initStreamObserver() {
             currentMediaIndex = bestIdx;
             updateModalCounter();
 
-            // 接近窗口边缘时，防抖后重新居中渲染（避免滚动过程中频繁重建导致闪烁）
-            const nearStart = (bestIdx - streamRenderedStart <= 1);
-            const nearEnd = (streamRenderedEnd - bestIdx <= 1);
+            // 接近窗口边缘时，防抖后增量扩展窗口（滑动停止后再动，避免抽动）
+            const nearStart = (bestIdx - streamRenderedStart <= 2);
+            const nearEnd = (streamRenderedEnd - bestIdx <= 2);
             if (nearStart || nearEnd) {
                 if (streamRebuildTimer) clearTimeout(streamRebuildTimer);
                 streamRebuildTimer = setTimeout(() => {
                     streamRebuildTimer = null;
                     if (currentModalMode === 'stream' && imageModal && imageModal.style.display === 'flex') {
-                        // 用当前 index 重新居中，behavior auto，避免平滑滚动再触发 observer
                         renderModalStreamView(false);
                     }
-                }, 180); // 180ms 防抖，滑动停止后再重建
+                }, 280); // 稍长防抖，等手指停稳再扩展
             }
         }
     }, {
         root: modalStreamView,
-        rootMargin: '-35% 0px -35% 0px',
-        threshold: [0, 0.25, 0.5, 0.75]
+        rootMargin: '-30% 0px -30% 0px',
+        threshold: [0, 0.2, 0.4, 0.6, 0.8]
     });
 
     const imgs = modalStreamView.querySelectorAll('img');
@@ -2617,8 +2616,24 @@ function initStreamObserver() {
 }
 
 /**
- * 流式模式按需渲染：只创建并加载当前索引 ± STREAM_WINDOW_HALF 张图片
- * @param {boolean} [fromUserNav=false] 是否来自音量键/方向键导航（会忽略 observer 更久）
+ * 创建单张流式图片节点
+ */
+function createStreamImage(idx, isCenter) {
+    const item = currentMediaList[idx];
+    if (!item || item.isVideo) return null;
+    const url = item.srcUrl || mediaUrlsMap.get(item.keyLower) || '';
+    const img = document.createElement('img');
+    img.src = url;
+    img.dataset.index = idx;
+    img.loading = 'eager';
+    img.decoding = 'async';
+    if (isCenter) img.id = 'target-stream-img';
+    return img;
+}
+
+/**
+ * 流式模式：增量增删 + 高度补偿，尽量避免整页清空导致的抽动
+ * @param {boolean} [fromUserNav=false] 是否来自音量键/方向键导航
  */
 function renderModalStreamView(fromUserNav = false) {
     if (!currentMediaList || currentMediaList.length === 0) {
@@ -2648,49 +2663,115 @@ function renderModalStreamView(fromUserNav = false) {
     const start = Math.max(0, centerIdx - STREAM_WINDOW_HALF);
     const end = Math.min(currentMediaList.length - 1, centerIdx + STREAM_WINDOW_HALF);
 
-    // 跳转后短暂忽略 observer
-    streamIgnoreObserverUntil = Date.now() + (fromUserNav ? 220 : 160);
+    streamIgnoreObserverUntil = Date.now() + (fromUserNav ? 320 : 200);
 
-    // 清空并重建窗口
+    const container = modalStreamView;
+    const existingImgs = Array.from(container.querySelectorAll('img[data-index]'));
+    const existingSet = new Set(existingImgs.map(img => parseInt(img.dataset.index, 10)));
+
+    // 判断是否大范围跳转（首次进入、音量键大跨度、或窗口几乎无重叠）
+    const overlapStart = Math.max(start, streamRenderedStart);
+    const overlapEnd = Math.min(end, streamRenderedEnd);
+    const hasGoodOverlap = (streamRenderedEnd >= streamRenderedStart) &&
+                           (overlapEnd - overlapStart >= STREAM_WINDOW_HALF - 2);
+
+    // ---------- 大跳转 / 首次：完整重建并居中（最稳） ----------
+    if (fromUserNav || !hasGoodOverlap || existingImgs.length === 0) {
+        if (streamObserver) {
+            streamObserver.disconnect();
+            streamObserver = null;
+        }
+        container.innerHTML = '';
+        streamRenderedStart = start;
+        streamRenderedEnd = end;
+
+        for (let idx = start; idx <= end; idx++) {
+            const img = createStreamImage(idx, idx === centerIdx);
+            if (img) container.appendChild(img);
+        }
+
+        updateModalCounter();
+
+        const targetEl = document.getElementById('target-stream-img');
+        if (targetEl) {
+            requestAnimationFrame(() => {
+                targetEl.scrollIntoView({ behavior: 'auto', block: 'center' });
+                requestAnimationFrame(() => initStreamObserver());
+            });
+        } else {
+            initStreamObserver();
+        }
+        return;
+    }
+
+    // ---------- 增量模式：只增删两端，尽量保持当前视觉位置 ----------
     if (streamObserver) {
         streamObserver.disconnect();
         streamObserver = null;
     }
-    modalStreamView.innerHTML = '';
+
+    // 1. 删除窗口外的图片，顶部删除时补偿 scrollTop
+    existingImgs.forEach(img => {
+        const idx = parseInt(img.dataset.index, 10);
+        if (idx < start || idx > end) {
+            if (idx < start) {
+                const h = img.offsetHeight || 0;
+                container.scrollTop = Math.max(0, container.scrollTop - h);
+            }
+            img.remove();
+        }
+    });
+
+    // 2. 前面缺少的 → prepend，并在加载后补偿高度变化
+    const frontIndices = [];
+    for (let idx = start; idx < streamRenderedStart; idx++) {
+        if (!existingSet.has(idx)) frontIndices.push(idx);
+    }
+    // 从大到小 prepend，保证最终顺序正确
+    frontIndices.sort((a, b) => b - a);
+
+    frontIndices.forEach(idx => {
+        const img = createStreamImage(idx, false);
+        if (!img) return;
+
+        // 先插入，等图片真正有高度后再补偿
+        container.prepend(img);
+
+        const compensate = () => {
+            // 插入到顶部后，为了让当前可见内容位置不变，需要把 scrollTop 加上这张图的高度
+            const h = img.offsetHeight || 0;
+            if (h > 0) {
+                container.scrollTop += h;
+            }
+        };
+
+        if (img.complete && img.naturalHeight > 0) {
+            // 已缓存，同步补偿
+            compensate();
+        } else {
+            img.addEventListener('load', compensate, { once: true });
+            // 兜底：如果 load 迟迟不触发，也给一个超时补偿
+            setTimeout(compensate, 80);
+        }
+    });
+
+    // 3. 后面缺少的 → append（不影响当前 scrollTop）
+    for (let idx = streamRenderedEnd + 1; idx <= end; idx++) {
+        if (existingSet.has(idx)) continue;
+        const img = createStreamImage(idx, false);
+        if (img) container.appendChild(img);
+    }
+
     streamRenderedStart = start;
     streamRenderedEnd = end;
 
-    for (let idx = start; idx <= end; idx++) {
-        const item = currentMediaList[idx];
-        if (!item || item.isVideo) continue;
-
-        const url = item.srcUrl || mediaUrlsMap.get(item.keyLower) || '';
-        const streamImg = document.createElement('img');
-        streamImg.src = url;
-        streamImg.dataset.index = idx;
-        streamImg.loading = 'eager';
-        streamImg.decoding = 'async';
-        if (idx === centerIdx) {
-            streamImg.id = 'target-stream-img';
-        }
-        modalStreamView.appendChild(streamImg);
-    }
+    // 确保当前中心图有正确的 id（方便后续定位）
+    container.querySelectorAll('img').forEach(img => {
+        img.id = (parseInt(img.dataset.index, 10) === centerIdx) ? 'target-stream-img' : '';
+    });
 
     updateModalCounter();
-
-    const targetEl = document.getElementById('target-stream-img');
-    if (targetEl) {
-        // 使用 auto 避免 smooth 过程中 observer 乱跳
-        requestAnimationFrame(() => {
-            targetEl.scrollIntoView({ behavior: 'auto', block: 'center' });
-            // 再等一帧后重新绑定 observer
-            requestAnimationFrame(() => {
-                initStreamObserver();
-            });
-        });
-    } else {
-        initStreamObserver();
-    }
+    requestAnimationFrame(() => initStreamObserver());
 }
 
 function switchModalMode(mode) {
