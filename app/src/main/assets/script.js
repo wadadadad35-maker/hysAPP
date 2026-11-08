@@ -109,10 +109,13 @@ let currentMediaList = [];
 let currentMediaIndex = -1;
 let currentModalMode = 'paged';
 let streamObserver = null;
-/** 流式模式按需渲染窗口：只保留当前索引 ± STREAM_WINDOW_HALF 张图片 */
+/** 流式模式按需渲染：只保留当前索引 ± STREAM_WINDOW_HALF 张 */
 const STREAM_WINDOW_HALF = 3;
 let streamRenderedStart = 0;
 let streamRenderedEnd = -1;
+/** 跳转/重建时短暂忽略 Observer，防止 index 被抢回导致闪烁 */
+let streamIgnoreObserverUntil = 0;
+let streamRebuildTimer = null;
 let lastRenderedText = '';
 
 let saveDebounceTimer = null;
@@ -2564,33 +2567,49 @@ function openImageModal() {
 function initStreamObserver() {
     if (streamObserver) {
         streamObserver.disconnect();
+        streamObserver = null;
     }
 
     streamObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                const idx = parseInt(entry.target.dataset.index, 10);
-                if (!isNaN(idx) && idx !== currentMediaIndex) {
-                    currentMediaIndex = idx;
-                    updateModalCounter();
+        // 跳转/重建后的短暂时间内忽略，防止闪烁和 index 被抢
+        if (Date.now() < streamIgnoreObserverUntil) return;
 
-                    // 若当前居中图片接近窗口边缘，重新以当前索引为中心渲染窗口（保持只保留 ±3）
-                    const nearEdge = (idx - streamRenderedStart <= 1) || (streamRenderedEnd - idx <= 1);
-                    if (nearEdge) {
-                        // 延迟一帧再渲染，避免与滚动冲突
-                        requestAnimationFrame(() => {
-                            if (currentModalMode === 'stream' && imageModal.style.display === 'flex') {
-                                renderModalStreamView(true); // true = 保持当前滚动意图，平滑过渡
-                            }
-                        });
-                    }
-                }
+        let bestIdx = -1;
+        let bestRatio = 0;
+
+        entries.forEach(entry => {
+            if (!entry.isIntersecting) return;
+            const idx = parseInt(entry.target.dataset.index, 10);
+            if (isNaN(idx)) return;
+            // 优先选交叉比例更高的（更居中）
+            if (entry.intersectionRatio > bestRatio) {
+                bestRatio = entry.intersectionRatio;
+                bestIdx = idx;
             }
         });
+
+        if (bestIdx >= 0 && bestIdx !== currentMediaIndex) {
+            currentMediaIndex = bestIdx;
+            updateModalCounter();
+
+            // 接近窗口边缘时，防抖后重新居中渲染（避免滚动过程中频繁重建导致闪烁）
+            const nearStart = (bestIdx - streamRenderedStart <= 1);
+            const nearEnd = (streamRenderedEnd - bestIdx <= 1);
+            if (nearStart || nearEnd) {
+                if (streamRebuildTimer) clearTimeout(streamRebuildTimer);
+                streamRebuildTimer = setTimeout(() => {
+                    streamRebuildTimer = null;
+                    if (currentModalMode === 'stream' && imageModal && imageModal.style.display === 'flex') {
+                        // 用当前 index 重新居中，behavior auto，避免平滑滚动再触发 observer
+                        renderModalStreamView(false);
+                    }
+                }, 180); // 180ms 防抖，滑动停止后再重建
+            }
+        }
     }, {
         root: modalStreamView,
-        rootMargin: '-40% 0px -40% 0px',
-        threshold: 0
+        rootMargin: '-35% 0px -35% 0px',
+        threshold: [0, 0.25, 0.5, 0.75]
     });
 
     const imgs = modalStreamView.querySelectorAll('img');
@@ -2599,9 +2618,9 @@ function initStreamObserver() {
 
 /**
  * 流式模式按需渲染：只创建并加载当前索引 ± STREAM_WINDOW_HALF 张图片
- * @param {boolean} [preserveScroll=false] 是否尽量保持视觉连续性（用于滚动扩展时）
+ * @param {boolean} [fromUserNav=false] 是否来自音量键/方向键导航（会忽略 observer 更久）
  */
-function renderModalStreamView(preserveScroll = false) {
+function renderModalStreamView(fromUserNav = false) {
     if (!currentMediaList || currentMediaList.length === 0) {
         modalStreamView.innerHTML = '';
         streamRenderedStart = 0;
@@ -2609,20 +2628,10 @@ function renderModalStreamView(preserveScroll = false) {
         return;
     }
 
-    // 只收集非视频图片的有效索引范围
-    const validIndices = [];
-    for (let i = 0; i < currentMediaList.length; i++) {
-        if (!currentMediaList[i].isVideo) validIndices.push(i);
-    }
-    if (validIndices.length === 0) {
-        modalStreamView.innerHTML = '';
-        return;
-    }
-
-    // 以当前 currentMediaIndex 为中心取窗口（若当前是视频则找最近的图片）
+    // 确保 center 不是视频
     let centerIdx = currentMediaIndex;
+    if (centerIdx < 0 || centerIdx >= currentMediaList.length) centerIdx = 0;
     if (currentMediaList[centerIdx] && currentMediaList[centerIdx].isVideo) {
-        // 找最近的非视频
         let found = -1;
         for (let d = 1; d < currentMediaList.length; d++) {
             if (centerIdx - d >= 0 && !currentMediaList[centerIdx - d].isVideo) { found = centerIdx - d; break; }
@@ -2639,26 +2648,14 @@ function renderModalStreamView(preserveScroll = false) {
     const start = Math.max(0, centerIdx - STREAM_WINDOW_HALF);
     const end = Math.min(currentMediaList.length - 1, centerIdx + STREAM_WINDOW_HALF);
 
-    // 如果窗口范围没变且已有内容，可跳过（但通常滚动扩展时会变）
-    const needRebuild = (start !== streamRenderedStart || end !== streamRenderedEnd || modalStreamView.children.length === 0);
+    // 跳转后短暂忽略 observer
+    streamIgnoreObserverUntil = Date.now() + (fromUserNav ? 220 : 160);
 
-    if (!needRebuild && !preserveScroll) {
-        // 仅更新目标高亮与滚动
-        const oldTarget = document.getElementById('target-stream-img');
-        if (oldTarget) oldTarget.removeAttribute('id');
-        const newTarget = modalStreamView.querySelector(`img[data-index="${centerIdx}"]`);
-        if (newTarget) {
-            newTarget.id = 'target-stream-img';
-            newTarget.scrollIntoView({ behavior: preserveScroll ? 'smooth' : 'auto', block: 'center' });
-        }
-        updateModalCounter();
-        return;
+    // 清空并重建窗口
+    if (streamObserver) {
+        streamObserver.disconnect();
+        streamObserver = null;
     }
-
-    // 记录旧的目标图片高度，用于简单补偿（可选）
-    const oldTargetEl = document.getElementById('target-stream-img');
-    const oldScrollTop = modalStreamView.scrollTop;
-
     modalStreamView.innerHTML = '';
     streamRenderedStart = start;
     streamRenderedEnd = end;
@@ -2671,7 +2668,7 @@ function renderModalStreamView(preserveScroll = false) {
         const streamImg = document.createElement('img');
         streamImg.src = url;
         streamImg.dataset.index = idx;
-        streamImg.loading = 'eager'; // 窗口内立即加载
+        streamImg.loading = 'eager';
         streamImg.decoding = 'async';
         if (idx === centerIdx) {
             streamImg.id = 'target-stream-img';
@@ -2683,11 +2680,14 @@ function renderModalStreamView(preserveScroll = false) {
 
     const targetEl = document.getElementById('target-stream-img');
     if (targetEl) {
-        // 短延迟确保布局完成后再滚动
-        setTimeout(() => {
-            targetEl.scrollIntoView({ behavior: preserveScroll ? 'smooth' : 'auto', block: 'center' });
-            initStreamObserver();
-        }, 30);
+        // 使用 auto 避免 smooth 过程中 observer 乱跳
+        requestAnimationFrame(() => {
+            targetEl.scrollIntoView({ behavior: 'auto', block: 'center' });
+            // 再等一帧后重新绑定 observer
+            requestAnimationFrame(() => {
+                initStreamObserver();
+            });
+        });
     } else {
         initStreamObserver();
     }
@@ -2757,14 +2757,9 @@ function switchMedia(direction) {
             modalImg.src = url;
             updateModalCounter();
         } else if (currentModalMode === 'stream') {
-            // 目标可能不在当前渲染窗口内，重新以新索引为中心渲染
-            const targetImg = modalStreamView.querySelector(`img[data-index="${currentMediaIndex}"]`);
-            if (targetImg) {
-                targetImg.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                updateModalCounter();
-            } else {
-                renderModalStreamView(false);
-            }
+            // 音量键/方向键：始终以新索引为中心重建窗口，并忽略 observer 一段时间
+            // 使用 fromUserNav=true，behavior 固定为 auto，避免 smooth 导致循环抢 index
+            renderModalStreamView(true);
         }
     }
 }
