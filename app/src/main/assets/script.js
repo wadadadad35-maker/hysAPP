@@ -2557,25 +2557,78 @@ function openImageModal() {
     switchModalMode(currentModalMode);
 }
 
+/**
+ * 统一同步媒体进度（翻页 / 流式共用）
+ * - 更新 currentMediaIndex、modal 计数
+ * - 同步外层 activeMediaPath / currentFileKey / fileTitle / 预览图
+ * - 防抖写入 localStorage，保证「上次进度」与里外显示一致
+ */
+function syncMediaToIndex(index, options = {}) {
+    const { save = true, updateOuter = true } = options;
+    if (!currentMediaList || index < 0 || index >= currentMediaList.length) return;
+
+    const prevIndex = currentMediaIndex;
+    currentMediaIndex = index;
+    const item = currentMediaList[index];
+    if (!item) return;
+
+    updateModalCounter();
+
+    if (updateOuter && !item.isVideo) {
+        activeMediaPath = (item.path || '').replace(/\\/g, '/');
+        currentFileKey = item.keyLower;
+
+        const totalCount = currentMediaList.length;
+        const progressText = totalCount > 0 ? ` (${index + 1}/${totalCount})` : '';
+        if (fileTitle) {
+            fileTitle.textContent = `🖼️ ${item.path}${progressText}`;
+        }
+
+        // 同步外层预览图，关闭 modal 后仍是同一张
+        if (imgDisplay && mediaViewer && mediaViewer.style.display !== 'none') {
+            const url = item.srcUrl || mediaUrlsMap.get(item.keyLower) || '';
+            if (url) {
+                imgDisplay.src = url;
+            }
+        }
+
+        try {
+            localStorage.setItem('last_file_key', item.keyLower);
+        } catch (e) {}
+    }
+
+    // 仅在真正换页时防抖保存，避免流式滑动狂写 localStorage
+    if (save && currentRootFolderPath && index !== prevIndex) {
+        scheduleSaveFolderViewState();
+    }
+}
+
 function initStreamObserver() {
     if (streamObserver) {
         streamObserver.disconnect();
     }
 
     streamObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                const idx = parseInt(entry.target.dataset.index, 10);
-                if (!isNaN(idx) && idx !== currentMediaIndex) {
-                    currentMediaIndex = idx;
-                    updateModalCounter();
-                }
+        // 取可见比例最高的一张，减少多图同时命中时的抖动
+        let bestEntry = null;
+        let bestRatio = -1;
+        for (const entry of entries) {
+            if (entry.isIntersecting && entry.intersectionRatio > bestRatio) {
+                bestRatio = entry.intersectionRatio;
+                bestEntry = entry;
             }
-        });
+        }
+        if (!bestEntry) return;
+
+        const idx = parseInt(bestEntry.target.dataset.index, 10);
+        if (!isNaN(idx) && idx !== currentMediaIndex) {
+            // 与翻页共用同一套同步逻辑 → 里外进度 + 持久化一致
+            syncMediaToIndex(idx, { save: true, updateOuter: true });
+        }
     }, {
         root: modalStreamView,
         rootMargin: '-40% 0px -40% 0px',
-        threshold: 0
+        threshold: [0, 0.1, 0.25, 0.5, 0.75, 1]
     });
 
     const imgs = modalStreamView.querySelectorAll('img');
@@ -2630,6 +2683,8 @@ function switchModalMode(mode) {
             modalImg.src = url;
         }
         updateModalCounter();
+        // 切换到翻页时也把外层进度对齐当前 index
+        syncMediaToIndex(currentMediaIndex, { save: true, updateOuter: true });
     } else {
         btnModalStream.classList.add('active');
         btnModalPaged.classList.remove('active');
@@ -2659,27 +2714,42 @@ function switchMedia(direction) {
     if (!currentMediaList || currentMediaList.length === 0) return;
 
     let newIndex = currentMediaIndex + direction;
-
     if (newIndex < 0 || newIndex >= currentMediaList.length) return;
 
-    currentMediaIndex = newIndex;
-    const targetItem = currentMediaList[currentMediaIndex];
+    const targetItem = currentMediaList[newIndex];
 
-    if (mediaViewer.style.display !== 'none') {
-        previewMedia(targetItem.keyLower, targetItem.name, targetItem.path, targetItem.isVideo);
-    }
+    // 统一同步内外进度与持久化
+    syncMediaToIndex(newIndex, { save: true, updateOuter: true });
 
     if (imageModal.style.display === 'flex' && !targetItem.isVideo) {
         if (currentModalMode === 'paged') {
             const url = targetItem.srcUrl || mediaUrlsMap.get(targetItem.keyLower) || '';
             modalImg.src = url;
-            updateModalCounter();
         } else if (currentModalMode === 'stream') {
-            const targetImg = modalStreamView.querySelector(`img[data-index="${currentMediaIndex}"]`);
+            const targetImg = modalStreamView.querySelector(`img[data-index="${newIndex}"]`);
             if (targetImg) {
                 targetImg.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
-            updateModalCounter();
+        }
+    } else if (mediaViewer.style.display !== 'none') {
+        // 不在大图 modal 时走完整 previewMedia（含视频逻辑）
+        previewMedia(targetItem.keyLower, targetItem.name, targetItem.path, targetItem.isVideo);
+    }
+}
+
+/** 关闭大图 modal 时强制对齐外层状态并立即落盘进度 */
+function closeImageModal() {
+    if (streamObserver) {
+        streamObserver.disconnect();
+        streamObserver = null;
+    }
+    imageModal.style.display = 'none';
+
+    if (currentMediaList && currentMediaIndex >= 0) {
+        syncMediaToIndex(currentMediaIndex, { save: false, updateOuter: true });
+        // 关闭时立刻写入，避免防抖未触发就切走导致进度丢失
+        if (currentRootFolderPath) {
+            saveFolderViewState();
         }
     }
 }
@@ -2746,11 +2816,7 @@ mediaViewer.addEventListener('click', (e) => {
 
 imageModal.addEventListener('click', (e) => {
     if (e.target === modalClose) {
-        if (streamObserver) {
-            streamObserver.disconnect();
-            streamObserver = null;
-        }
-        imageModal.style.display = 'none';
+        closeImageModal();
         return;
     }
 
@@ -2770,12 +2836,9 @@ imageModal.addEventListener('click', (e) => {
     }
 });
 
-modalClose.addEventListener('click', () => {
-    if (streamObserver) {
-        streamObserver.disconnect();
-        streamObserver = null;
-    }
-    imageModal.style.display = 'none';
+modalClose.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeImageModal();
 });
 
 // ==================== 音量键与方向键翻页监听 ====================
